@@ -1,0 +1,470 @@
+// Prisma Schema for Finance App
+// Database: PostgreSQL (Supabase)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ========================================
+// USERS & AUTHENTICATION
+// ========================================
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  avatarUrl    String?  @map("avatar_url")
+  currency     String   @default("CLP") // ISO currency code (CLP, USD, EUR)
+  country      String?
+  isVerified   Boolean  @default(false) @map("is_verified")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  accounts              Account[]
+  transactions          Transaction[]
+  budgets               Budget[]
+  categories            Category[]
+  tags                  Tag[]
+  groupMemberships      GroupMember[]
+  sharedExpensesPaid    SharedExpense[] @relation("PaidBy")
+  expenseParticipations ExpenseParticipant[]
+  paymentsFrom          Payment[] @relation("PaymentsFrom")
+  paymentsTo            Payment[] @relation("PaymentsTo")
+  groupsCreated         Group[] @relation("GroupCreator")
+  groupSplitDefaults    GroupMemberSplitDefault[]
+  importHistory         ImportHistory[]
+  notifications         Notification[]
+  dashboardPreference   UserDashboardPreference?
+
+  @@map("users")
+}
+
+// ========================================
+// ACCOUNTS & TRANSACTIONS
+// ========================================
+
+model Account {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  name        String
+  type        AccountType
+  balance     Decimal  @db.Decimal(15, 2)
+  currency    String   @default("CLP") // CLP, USD, EUR
+  isDefault   Boolean  @default(false) @map("is_default")
+
+  // Credit card specific fields
+  creditLimit Decimal? @db.Decimal(15, 2) @map("credit_limit") // Only for CREDIT type
+  billingDay  Int?     @map("billing_day") // Day of month (1-31) for statement generation
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user                  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions          Transaction[]
+  transfersDestination  Transaction[] @relation("TransferDestination")
+  importHistory         ImportHistory[]
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+enum AccountType {
+  CASH
+  DEBIT
+  CREDIT
+  SAVINGS
+  INVESTMENT
+}
+
+model Transaction {
+  id              String          @id @default(uuid())
+  userId          String          @map("user_id")
+  accountId       String          @map("account_id")
+  type            TransactionType
+  amount          Decimal         @db.Decimal(15, 2)
+  categoryId      String?         @map("category_id") // Reference to Category
+  description     String?
+  date            DateTime        @default(now())
+  receiptUrl      String?         @map("receipt_url")
+
+  // Additional fields
+  payee           String?         // Who received the payment (e.g., "McDonald's", "Uber", "Enel")
+  payer           String?         // Who made the payment (defaults to user's name)
+
+  // For transfers
+  toAccountId     String?         @map("to_account_id") // Destination account for transfers
+
+  // Shared expense relation
+  sharedExpenseId String?         @map("shared_expense_id")
+
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account       Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  toAccount     Account?       @relation("TransferDestination", fields: [toAccountId], references: [id])
+  sharedExpense SharedExpense? @relation(fields: [sharedExpenseId], references: [id], onDelete: SetNull)
+  tags          TransactionTag[]
+  importedTransactions ImportedTransaction[]
+
+  @@index([userId])
+  @@index([accountId])
+  @@index([categoryId])
+  @@index([date])
+  @@index([toAccountId])
+  @@index([sharedExpenseId])
+  @@map("transactions")
+}
+
+enum TransactionType {
+  EXPENSE
+  INCOME
+  TRANSFER
+}
+
+// ========================================
+// CATEGORIES & TAGS
+// ========================================
+
+model Category {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  name        String
+  icon        String?  // Icon name or emoji
+  color       String?  // Color hex code
+  type        TransactionType // Category for EXPENSE, INCOME, or both
+  parentId    String?  @map("parent_id") // For subcategories
+  isDefault   Boolean  @default(false) @map("is_default") // System default categories
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent         Category?       @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  subcategories  Category[]      @relation("CategoryHierarchy")
+  transactions   Transaction[]
+  sharedExpenses SharedExpense[]
+
+  @@index([userId])
+  @@index([parentId])
+  @@index([type])
+  @@map("categories")
+}
+
+model Tag {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  name      String
+  color     String?  // Color hex code
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions TransactionTag[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("tags")
+}
+
+model TransactionTag {
+  id            String   @id @default(uuid())
+  transactionId String   @map("transaction_id")
+  tagId         String   @map("tag_id")
+
+  // Relations
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  tag         Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([transactionId, tagId])
+  @@index([transactionId])
+  @@index([tagId])
+  @@map("transaction_tags")
+}
+
+// ========================================
+// BUDGETS
+// ========================================
+
+model Budget {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  amount    Decimal  @db.Decimal(15, 2)
+  month     Int
+  year      Int
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, month, year], name: "userId_month_year")
+  @@index([userId])
+  @@map("budgets")
+}
+
+// ========================================
+// GROUPS & SHARED EXPENSES
+// ========================================
+
+model Group {
+  id            String    @id @default(uuid())
+  name          String
+  description   String?
+  coverImageUrl String?   @map("cover_image_url")
+  createdBy     String    @map("created_by")
+
+  // Default split settings
+  defaultSplitType SplitType? @default(EQUAL) @map("default_split_type")
+
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  creator                User                     @relation("GroupCreator", fields: [createdBy], references: [id])
+  members                GroupMember[]
+  sharedExpenses         SharedExpense[]
+  payments               Payment[]
+  defaultSplitSettings   GroupMemberSplitDefault[]
+
+  @@index([createdBy])
+  @@map("groups")
+}
+
+model GroupMemberSplitDefault {
+  id         String   @id @default(uuid())
+  groupId    String   @map("group_id")
+  userId     String   @map("user_id")
+  percentage Decimal? @db.Decimal(5, 2) // For PERCENTAGE type
+  shares     Int?     // For SHARES type
+  exactAmount Decimal? @db.Decimal(15, 2) // For EXACT type
+
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+  @@map("group_member_split_defaults")
+}
+
+model GroupMember {
+  id       String   @id @default(uuid())
+  groupId  String   @map("group_id")
+  userId   String   @map("user_id")
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  // Relations
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+model SharedExpense {
+  id           String        @id @default(uuid())
+  groupId      String        @map("group_id")
+  paidByUserId String        @map("paid_by_user_id")
+  amount       Decimal       @db.Decimal(15, 2)
+  description  String
+  categoryId   String?       @map("category_id")
+  date         DateTime      @default(now())
+  receiptUrl   String?       @map("receipt_url")
+  splitType    SplitType     @default(EQUAL) @map("split_type")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  group        Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  paidBy       User                 @relation("PaidBy", fields: [paidByUserId], references: [id])
+  category     Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  participants ExpenseParticipant[]
+  transactions Transaction[]
+
+  @@index([groupId])
+  @@index([paidByUserId])
+  @@index([categoryId])
+  @@map("shared_expenses")
+}
+
+enum SplitType {
+  EQUAL       // Split equally among participants
+  PERCENTAGE  // Split by percentage
+  EXACT       // Exact amounts per participant
+  SHARES      // Split by shares (like Splitwise)
+}
+
+model ExpenseParticipant {
+  id         String   @id @default(uuid())
+  expenseId  String   @map("expense_id")
+  userId     String   @map("user_id")
+  amountOwed Decimal  @db.Decimal(15, 2) @map("amount_owed")
+  percentage Decimal? @db.Decimal(5, 2) // For PERCENTAGE split type (0-100)
+  shares     Int?     // For SHARES split type
+
+  // Payment tracking fields
+  isPaid      Boolean   @default(false) @map("is_paid")
+  paidDate    DateTime? @map("paid_date")
+  paidAmount  Decimal?  @db.Decimal(15, 2) @map("paid_amount")
+
+  // Relations
+  expense SharedExpense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id])
+
+  @@unique([expenseId, userId])
+  @@index([expenseId])
+  @@index([userId])
+  @@map("expense_participants")
+}
+
+model Payment {
+  id         String   @id @default(uuid())
+  groupId    String?  @map("group_id")
+  fromUserId String   @map("from_user_id")
+  toUserId   String   @map("to_user_id")
+  amount     Decimal  @db.Decimal(15, 2)
+  date       DateTime @default(now())
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  group Group? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  from  User   @relation("PaymentsFrom", fields: [fromUserId], references: [id])
+  to    User   @relation("PaymentsTo", fields: [toUserId], references: [id])
+
+  @@index([groupId])
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@map("payments")
+}
+
+// ========================================
+// IMPORT HISTORY
+// ========================================
+
+model ImportHistory {
+  id            String             @id @default(uuid())
+  userId        String             @map("user_id")
+  accountId     String             @map("account_id")
+  fileName      String             @map("file_name")
+  fileType      String             @map("file_type") // CSV or EXCEL
+  totalRows     Int                @map("total_rows")
+  successCount  Int                @default(0) @map("success_count")
+  failedCount   Int                @default(0) @map("failed_count")
+  status        ImportHistoryStatus @default(PROCESSING)
+  importedAt    DateTime           @default(now()) @map("imported_at")
+  completedAt   DateTime?          @map("completed_at")
+
+  // Relations
+  user                User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account             Account                   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  importedTransactions ImportedTransaction[]
+
+  @@index([userId])
+  @@index([accountId])
+  @@index([importedAt])
+  @@index([status])
+  @@map("import_history")
+}
+
+model ImportedTransaction {
+  id              String        @id @default(uuid())
+  importHistoryId String        @map("import_history_id")
+  transactionId   String?       @map("transaction_id") // NULL if failed
+  rowNumber       Int           @map("row_number")
+  status          ImportStatus
+  errorMessage    String?       @map("error_message")
+
+  // Original data from import
+  originalDate    String        @map("original_date")
+  type            String
+  amount          String
+  description     String
+  category        String?
+  tags            String?
+  notes           String?
+
+  // Relations
+  importHistory ImportHistory @relation(fields: [importHistoryId], references: [id], onDelete: Cascade)
+  transaction   Transaction?  @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([importHistoryId])
+  @@index([transactionId])
+  @@map("imported_transactions")
+}
+
+enum ImportStatus {
+  SUCCESS
+  FAILED
+}
+
+enum ImportHistoryStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ========================================
+// NOTIFICATIONS
+// ========================================
+
+model Notification {
+  id        String             @id @default(uuid())
+  userId    String             @map("user_id")
+  type      NotificationType
+  title     String
+  message   String
+  data      Json?              // Additional data (expenseId, groupId, amount, etc.)
+  isRead    Boolean            @default(false) @map("is_read")
+  createdAt DateTime           @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  PAYMENT_RECEIVED
+  SHARED_EXPENSE_CREATED
+  GROUP_MEMBER_ADDED
+  BALANCE_SETTLED
+}
+
+// ========================================
+// DASHBOARD PREFERENCES
+// ========================================
+
+model UserDashboardPreference {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id") @unique
+  widgets   Json     @default("[]") // Array of WidgetConfig
+  layout    Json     @default("[]") // Array of GridLayout items
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_dashboard_preferences")
+}

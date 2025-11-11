@@ -1,0 +1,197 @@
+import { Request, Response, NextFunction } from 'express';
+import * as sharedExpenseService from '../services/sharedExpense.service';
+import { createSharedExpenseSchema, createPaymentSchema } from '../utils/validation';
+
+export const createSharedExpense = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const validatedData = createSharedExpenseSchema.parse(req.body);
+    const expense = await sharedExpenseService.createSharedExpense(
+      userId,
+      validatedData
+    );
+
+    res.status(201).json({
+      success: true,
+      data: expense,
+      message: 'Shared expense created successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getSharedExpenses = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const groupId = req.query.groupId as string | undefined;
+    const expenses = await sharedExpenseService.getSharedExpenses(userId, groupId);
+
+    res.status(200).json({
+      success: true,
+      data: expenses,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getSharedExpenseById = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { id } = req.params;
+    const expense = await sharedExpenseService.getSharedExpenseById(userId, id);
+
+    res.status(200).json({
+      success: true,
+      data: expense,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteSharedExpense = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { id } = req.params;
+    const result = await sharedExpenseService.deleteSharedExpense(userId, id);
+
+    res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const settlePayment = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const validatedData = createPaymentSchema.parse(req.body);
+    const payment = await sharedExpenseService.settlePayment(
+      userId,
+      validatedData.toUserId,
+      validatedData.amount,
+      validatedData.groupId
+    );
+
+    res.status(201).json({
+      success: true,
+      data: payment,
+      message: 'Payment settled successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getPaymentHistory = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const groupId = req.query.groupId as string | undefined;
+    const payments = await sharedExpenseService.getPaymentHistory(userId, groupId);
+
+    res.status(200).json({
+      success: true,
+      data: payments,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const calculateSimplifiedDebts = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { groupId } = req.params;
+    const debts = await sharedExpenseService.calculateSimplifiedDebts(
+      userId,
+      groupId
+    );
+
+    res.status(200).json({
+      success: true,
+      data: debts,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const markParticipantAsPaid = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { id: expenseId, participantUserId } = req.params;
+    const participant = await sharedExpenseService.markParticipantAsPaid(
+      userId,
+      expenseId,
+      participantUserId
+    );
+
+    res.status(200).json({
+      success: true,
+      data: participant,
+      message: 'Participant marked as paid successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const markParticipantAsUnpaid = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { id: expenseId, participantUserId } = req.params;
+    const participant = await sharedExpenseService.markParticipantAsUnpaid(
+      userId,
+      expenseId,
+      participantUserId
+    );
+
+    res.status(200).json({
+      success: true,
+      data: participant,
+      message: 'Participant marked as unpaid successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};

@@ -14,12 +14,11 @@
     "sourceMap": true,
     "declaration": true,
     "removeComments": true,
-    "typeRoots": ["./node_modules/@types", "./src/types"]
+    "typeRoots": ["./node_modules/@types"]
   },
   "ts-node": {
     "files": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"],
-  "files": ["src/types/express.d.ts"]
+  "exclude": ["node_modules", "dist"]
 }

@@ -35,21 +35,35 @@ export const getTransactions = async (
 ) => {
   try {
     const userId = (req as any).user.userId;
+
+    // Process tags array safely
+    let tags: string[] | undefined;
+    if (req.query.tags) {
+      if (Array.isArray(req.query.tags)) {
+        tags = req.query.tags.map(t => String(t));
+      } else {
+        tags = [String(req.query.tags)];
+      }
+    }
+
     const filters = {
       accountId: req.query.accountId as string,
       type: req.query.type as any,
-      category: req.query.category as string,
+      categoryId: req.query.categoryId as string,
       startDate: req.query.startDate as string,
       endDate: req.query.endDate as string,
       minAmount: req.query.minAmount ? Number(req.query.minAmount) : undefined,
       maxAmount: req.query.maxAmount ? Number(req.query.maxAmount) : undefined,
+      tags,
+      page: req.query.page ? Number(req.query.page) : 1,
+      limit: req.query.limit ? Number(req.query.limit) : 50,
     };
 
-    const transactions = await transactionService.getTransactions(userId, filters);
+    const result = await transactionService.getTransactions(userId, filters);
 
     res.status(200).json({
       success: true,
-      data: transactions,
+      ...result,
     });
   } catch (error) {
     next(error);

@@ -42,6 +42,17 @@ interface TransactionFilters {
   minAmount?: number;
   maxAmount?: number;
   tags?: string[];
+  page?: number;
+  limit?: number;
+}
+
+interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasMore: boolean;
 }
 
 export const createTransaction = async (
@@ -211,7 +222,10 @@ async function updateAccountBalance(
   });
 }
 
-export const getTransactions = async (userId: string, filters: TransactionFilters) => {
+export const getTransactions = async (
+  userId: string,
+  filters: TransactionFilters
+): Promise<PaginatedResponse<any>> => {
   const where: any = { userId };
 
   if (filters.accountId) {
@@ -254,6 +268,15 @@ export const getTransactions = async (userId: string, filters: TransactionFilter
     };
   }
 
+  // Pagination parameters
+  const page = Math.max(filters.page || 1, 1);
+  const limit = Math.min(filters.limit || 50, 500); // Max 500 per page
+  const skip = (page - 1) * limit;
+
+  // Get total count for pagination
+  const total = await prisma.transaction.count({ where });
+
+  // Get paginated transactions
   const transactions = await prisma.transaction.findMany({
     where,
     include: {
@@ -276,9 +299,20 @@ export const getTransactions = async (userId: string, filters: TransactionFilter
       },
     },
     orderBy: { date: 'desc' },
+    skip,
+    take: limit,
   });
 
-  return transactions;
+  const totalPages = Math.ceil(total / limit);
+
+  return {
+    data: transactions,
+    total,
+    page,
+    limit,
+    totalPages,
+    hasMore: page < totalPages,
+  };
 };
 
 export const getTransactionById = async (userId: string, transactionId: string) => {

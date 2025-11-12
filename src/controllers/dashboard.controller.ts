@@ -97,3 +97,22 @@ export const getAccountBalances = async (
     next(error);
   }
 };
+
+export const getDashboardSummary = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+
+    const data = await dashboardService.getDashboardSummary(userId);
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

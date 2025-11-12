@@ -7,7 +7,10 @@ const router = Router();
 // All dashboard routes require authentication
 router.use(authenticate);
 
-// Dashboard endpoints
+// Unified summary endpoint (returns all widget data in one request)
+router.get('/summary', dashboardController.getDashboardSummary);
+
+// Individual endpoints
 router.get('/cashflow', dashboardController.getCashFlow);
 router.get('/expenses-by-category', dashboardController.getExpensesByCategory);
 router.get('/balance-history', dashboardController.getBalanceHistory);

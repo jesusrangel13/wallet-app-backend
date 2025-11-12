@@ -343,3 +343,38 @@ export const getAccountBalances = async (userId: string) => {
     color: accountTypeColors[account.type] || '#3b82f6',
   }));
 };
+
+/**
+ * Unified dashboard summary endpoint that returns all widget data in a single request
+ * This eliminates the need for multiple API calls to load the dashboard
+ */
+export const getDashboardSummary = async (userId: string) => {
+  try {
+    // Fetch all dashboard data in parallel
+    const [
+      cashFlow,
+      expensesByCategory,
+      balanceHistory,
+      groupBalances,
+      accountBalances,
+    ] = await Promise.all([
+      getCashFlow(userId),
+      getExpensesByCategory(userId),
+      getBalanceHistory(userId),
+      getGroupBalances(userId),
+      getAccountBalances(userId),
+    ]);
+
+    return {
+      cashFlow,
+      expensesByCategory,
+      balanceHistory,
+      groupBalances,
+      accountBalances,
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('Error getting dashboard summary:', error);
+    throw error;
+  }
+};

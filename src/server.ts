@@ -1,5 +1,6 @@
-import express, { Application } from 'express';
+import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import dotenv from 'dotenv';
 import { errorHandler } from './middleware/errorHandler';
 import { notFoundHandler } from './middleware/notFoundHandler';
@@ -26,6 +27,19 @@ const app: Application = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
+// Enable gzip compression for all responses (reduces payload size by ~70%)
+app.use(compression({
+  filter: (req: Request, res: Response) => {
+    // Don't compress responses with this request header
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    // Use compression filter function
+    return compression.filter(req, res);
+  },
+  level: 6, // Balance between speed and compression ratio
+}));
+
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').filter(Boolean) || ['http://localhost:3000'];
 app.use(cors({
   origin: (origin, callback) => {

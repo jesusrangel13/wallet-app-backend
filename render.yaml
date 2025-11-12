@@ -1,0 +1,35 @@
+services:
+  # Backend API Service
+  - type: web
+    name: finance-app-api
+    runtime: node
+    region: oregon # Puedes cambiar a otra región si prefieres
+    plan: free
+    branch: main
+    rootDir: backend
+    buildCommand: npm install --include=dev && npx prisma generate && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false # Se configurará manualmente en Render dashboard
+      - key: DIRECT_URL
+        sync: false # Se configurará manualmente en Render dashboard
+      - key: JWT_SECRET
+        generateValue: true # Render generará un valor aleatorio seguro
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: ALLOWED_ORIGINS
+        sync: https://wallet-app-frontend-e1cs.vercel.app/dashboard # Configurar con la URL de Vercel del frontend
+      - key: MAX_FILE_SIZE
+        value: 5242880
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+    disk:
+      name: finance-app-uploads
+      mountPath: /var/data/uploads
+      sizeGB: 1

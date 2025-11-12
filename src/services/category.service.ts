@@ -1,5 +1,6 @@
 import { PrismaClient, TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { defaultExpenseCategories, defaultIncomeCategories } from '../data/defaultCategories';
 
 const prisma = new PrismaClient();
 
@@ -157,4 +158,54 @@ export const deleteCategory = async (userId: string, id: string) => {
   });
 
   return { success: true };
+};
+
+/**
+ * Create default categories for a new user
+ * Creates both expense and income categories with their subcategories
+ */
+export const createDefaultCategoriesForUser = async (userId: string) => {
+  try {
+    const allDefaultCategories = [
+      ...defaultExpenseCategories,
+      ...defaultIncomeCategories,
+    ];
+
+    // Create each main category with its subcategories
+    for (const defaultCategory of allDefaultCategories) {
+      // Create main category
+      const mainCategory = await prisma.category.create({
+        data: {
+          userId,
+          name: defaultCategory.name,
+          icon: defaultCategory.icon,
+          color: defaultCategory.color,
+          type: defaultCategory.type as TransactionType,
+        },
+      });
+
+      // Create subcategories if they exist
+      if (defaultCategory.subcategories && defaultCategory.subcategories.length > 0) {
+        for (const subcategory of defaultCategory.subcategories) {
+          await prisma.category.create({
+            data: {
+              userId,
+              name: subcategory.name,
+              icon: subcategory.icon,
+              color: subcategory.color,
+              type: subcategory.type as TransactionType,
+              parentId: mainCategory.id,
+            },
+          });
+        }
+      }
+    }
+
+    console.log(`✓ Default categories created for user ${userId}`);
+    return true;
+  } catch (error) {
+    console.error(`Error creating default categories for user ${userId}:`, error);
+    // Don't throw - we don't want to block user registration if category creation fails
+    return false;
+  }
 };

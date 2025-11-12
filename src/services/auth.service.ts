@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { hashPassword, comparePassword } from '../utils/password';
 import { generateToken } from '../utils/jwt';
 import { AppError } from '../middleware/errorHandler';
+import { createDefaultCategoriesForUser } from './category.service';
 
 const prisma = new PrismaClient();
 
@@ -49,6 +50,9 @@ export const register = async (data: RegisterData) => {
       createdAt: true,
     },
   });
+
+  // Create default categories for the new user (non-blocking)
+  await createDefaultCategoriesForUser(user.id);
 
   // Generate token
   const token = generateToken(user.id);

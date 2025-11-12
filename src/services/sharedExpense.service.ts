@@ -13,6 +13,7 @@ interface ParticipantData {
 
 interface CreateSharedExpenseData {
   groupId: string;
+  paidByUserId?: string; // Optional: if provided, use this instead of authenticated user
   amount: number;
   description: string;
   categoryId?: string;
@@ -104,7 +105,7 @@ export const createSharedExpense = async (
   const expense = await prisma.sharedExpense.create({
     data: {
       groupId: data.groupId,
-      paidByUserId: userId,
+      paidByUserId: data.paidByUserId || userId, // Use provided paidByUserId or fallback to authenticated user
       amount: data.amount,
       description: data.description,
       categoryId: data.categoryId,

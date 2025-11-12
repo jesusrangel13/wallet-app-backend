@@ -112,6 +112,7 @@ export const updateGroupSchema = createGroupSchema.partial();
 // Shared Expense schemas
 export const createSharedExpenseSchema = z.object({
   groupId: z.string().uuid('Invalid group ID'),
+  paidByUserId: z.string().uuid('Invalid user ID').optional(), // Allow overriding who paid
   amount: z.number().positive('Amount must be positive'),
   description: z.string().min(1, 'Description is required'),
   categoryId: z.string().uuid('Invalid category ID').optional(),

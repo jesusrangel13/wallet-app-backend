@@ -240,21 +240,21 @@ export const getTransactions = async (
   }
 
   if (filters.categoryId) {
-    // Check if this category has children (is a parent category)
+    // Check if this category has subcategories (is a parent category)
     const selectedCategory = await prisma.category.findUnique({
       where: { id: filters.categoryId },
-      include: { children: { select: { id: true } } }
+      include: { subcategories: { select: { id: true } } }
     });
 
-    if (selectedCategory?.children && selectedCategory.children.length > 0) {
-      // Parent category: include this category AND all its children
-      const childIds = selectedCategory.children.map(child => child.id);
+    if (selectedCategory?.subcategories && selectedCategory.subcategories.length > 0) {
+      // Parent category: include this category AND all its subcategories
+      const subcategoryIds = selectedCategory.subcategories.map(sub => sub.id);
       where.OR = [
         { categoryId: filters.categoryId },
-        { categoryId: { in: childIds } }
+        { categoryId: { in: subcategoryIds } }
       ];
     } else {
-      // Child category or category without children: exact match
+      // Child category or category without subcategories: exact match
       where.categoryId = filters.categoryId;
     }
   }

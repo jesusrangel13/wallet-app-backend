@@ -32,6 +32,7 @@ model User {
   transactions          Transaction[]
   budgets               Budget[]
   categories            Category[]
+  categoryOverrides     UserCategoryOverride[] @relation("UserCategoryOverrides")
   tags                  Tag[]
   groupMemberships      GroupMember[]
   sharedExpensesPaid    SharedExpense[] @relation("PaidBy")
@@ -137,6 +138,55 @@ enum TransactionType {
 // CATEGORIES & TAGS
 // ========================================
 
+// Global template categories (shared across all users, read-only)
+model CategoryTemplate {
+  id                 String   @id @default(uuid())
+  name               String
+  icon               String?  // Icon name or emoji
+  color              String?  // Color hex code
+  type               TransactionType // EXPENSE, INCOME, or both
+  parentTemplateId   String?  @map("parent_template_id") // For subcategories
+  orderIndex         Int      @default(0) @map("order_index") // For sorting within parent
+  isSystem           Boolean  @default(true) @map("is_system") // Always true for templates
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  parent             CategoryTemplate?  @relation("CategoryTemplateHierarchy", fields: [parentTemplateId], references: [id], onDelete: Cascade)
+  subcategories      CategoryTemplate[] @relation("CategoryTemplateHierarchy")
+  userOverrides      UserCategoryOverride[]
+
+  @@index([parentTemplateId])
+  @@index([type])
+  @@unique([name, parentTemplateId]) // Ensure no duplicate categories at same level
+  @@map("category_templates")
+}
+
+// User-specific category overrides and customizations
+model UserCategoryOverride {
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  templateId         String?  @map("template_id") // NULL if fully custom category
+  name               String   // User's version (can override template name)
+  icon               String?  // User's version (can override template icon)
+  color              String?  // User's version (can override template color)
+  isActive           Boolean  @default(true) @map("is_active") // User can deactivate defaults
+  isCustom           Boolean  @default(false) @map("is_custom") // True if created by user, not from template
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user               User     @relation("UserCategoryOverrides", fields: [userId], references: [id], onDelete: Cascade)
+  template           CategoryTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([templateId])
+  @@index([isActive])
+  @@unique([userId, templateId]) // One override per template per user
+  @@map("user_category_overrides")
+}
+
+// Legacy categories table (keep temporarily for migration)
 model Category {
   id          String   @id @default(uuid())
   userId      String   @map("user_id")

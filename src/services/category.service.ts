@@ -1,8 +1,13 @@
 import { PrismaClient, TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { defaultExpenseCategories, defaultIncomeCategories } from '../data/defaultCategories';
+import { CategoryTemplateService } from './categoryTemplate.service';
+import { UserCategoryService } from './userCategory.service';
 
 const prisma = new PrismaClient();
+
+// Feature flag: USE_CATEGORY_TEMPLATES (set via environment variable)
+const USE_CATEGORY_TEMPLATES = process.env.USE_CATEGORY_TEMPLATES === 'true';
 
 interface CreateCategoryData {
   name: string;
@@ -50,6 +55,22 @@ export const createCategory = async (userId: string, data: CreateCategoryData) =
 };
 
 export const getCategories = async (userId: string, type?: string) => {
+  // If using new template system, get categories from templates + overrides
+  if (USE_CATEGORY_TEMPLATES) {
+    try {
+      // Return new template-based system categories
+      if (type) {
+        return await UserCategoryService.getUserCategoriesByType(userId, type as TransactionType);
+      } else {
+        return await UserCategoryService.getUserCategoriesHierarchy(userId);
+      }
+    } catch (error) {
+      // Fallback to legacy system if template system fails
+      console.error('Error fetching template categories:', error);
+    }
+  }
+
+  // Legacy system: fetch from Category table
   const whereClause: any = {
     userId,
     parentId: null, // Get only main categories
@@ -162,10 +183,18 @@ export const deleteCategory = async (userId: string, id: string) => {
 
 /**
  * Create default categories for a new user
- * Creates both expense and income categories with their subcategories
+ * New template system: No categories created (templates are shared)
+ * Legacy system: Creates both expense and income categories with their subcategories
  */
 export const createDefaultCategoriesForUser = async (userId: string) => {
   try {
+    // New template system: Nothing to do - templates are global, shared across users
+    if (USE_CATEGORY_TEMPLATES) {
+      console.log(`ℹ️  User ${userId} will access category templates (no per-user categories created)`);
+      return true;
+    }
+
+    // Legacy system: Create per-user default categories
     const allDefaultCategories = [
       ...defaultExpenseCategories,
       ...defaultIncomeCategories,

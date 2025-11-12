@@ -113,11 +113,13 @@ export const getBalanceHistory = async (userId: string, days: number = 30) => {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  // Get all transactions in the period
+  // Optimize: Use database aggregation instead of loading all transactions into memory
+  // Get transactions only for the display range
   const transactions = await prisma.transaction.findMany({
     where: {
       userId,
       date: {
+        gte: startDate,
         lte: endDate,
       },
     },
@@ -125,33 +127,33 @@ export const getBalanceHistory = async (userId: string, days: number = 30) => {
       date: true,
       type: true,
       amount: true,
-      accountId: true,
     },
     orderBy: {
       date: 'asc',
     },
   });
 
-  // Get initial balance (before start date)
-  const initialTransactions = await prisma.transaction.findMany({
+  // Calculate initial balance using database aggregation (before start date)
+  const initialBalanceData = await prisma.transaction.groupBy({
+    by: ['type'],
     where: {
       userId,
       date: {
         lt: startDate,
       },
     },
-    select: {
-      type: true,
+    _sum: {
       amount: true,
     },
   });
 
   let initialBalance = 0;
-  initialTransactions.forEach((tx) => {
-    if (tx.type === 'INCOME') {
-      initialBalance += Number(tx.amount);
-    } else if (tx.type === 'EXPENSE') {
-      initialBalance -= Number(tx.amount);
+  initialBalanceData.forEach((group) => {
+    const sum = group._sum.amount ? Number(group._sum.amount) : 0;
+    if (group.type === 'INCOME') {
+      initialBalance += sum;
+    } else if (group.type === 'EXPENSE') {
+      initialBalance -= sum;
     }
   });
 
@@ -211,98 +213,90 @@ export const getGroupBalances = async (userId: string) => {
 
   const groupIds = groupMembers.map((gm) => gm.groupId);
 
+  if (groupIds.length === 0) {
+    return [];
+  }
+
+  // Optimize: Fetch all data for all groups in parallel instead of N+1 queries
+  // Get all groups
+  const groups = await prisma.group.findMany({
+    where: { id: { in: groupIds } },
+    select: { id: true, name: true },
+  });
+
+  // Get all members for all groups
+  const allMembers = await prisma.groupMember.findMany({
+    where: { groupId: { in: groupIds } },
+    include: {
+      user: {
+        select: { id: true, name: true, email: true },
+      },
+    },
+  });
+
+  // Get all shared expenses for all groups
+  const allExpenses = await prisma.sharedExpense.findMany({
+    where: { groupId: { in: groupIds } },
+    include: { participants: true },
+  });
+
   // Calculate balances for each group
-  const groupBalances = await Promise.all(
-    groupIds.map(async (groupId) => {
-      // Get group details
-      const group = await prisma.group.findUnique({
-        where: { id: groupId },
-        select: {
-          id: true,
-          name: true,
-        },
+  const groupBalances = groups.map((group) => {
+    // Filter members and expenses for this group
+    const members = allMembers.filter((m) => m.groupId === group.id);
+    const sharedExpenses = allExpenses.filter((e) => e.groupId === group.id);
+
+    // Calculate balance for each member
+    const memberBalances: Record<string, number> = {};
+
+    // Initialize all members with 0 balance
+    members.forEach((member) => {
+      memberBalances[member.user.id] = 0;
+    });
+
+    // Calculate who owes whom
+    sharedExpenses.forEach((expense) => {
+      const paidBy = expense.paidByUserId;
+      const totalAmount = Number(expense.amount);
+
+      expense.participants.forEach((participant) => {
+        const amountOwed = Number(participant.amountOwed);
+
+        if (participant.userId === paidBy) {
+          // This person paid, so others owe them
+          // Their balance increases by what others owe them
+          memberBalances[participant.userId] += totalAmount - amountOwed;
+        } else {
+          // This person didn't pay, so they owe the payer
+          // Their balance decreases by what they owe
+          memberBalances[participant.userId] -= amountOwed;
+        }
       });
+    });
 
-      if (!group) return null;
+    // Calculate total owed TO the current user (positive balances of others = they owe me)
+    const totalOwed = Object.entries(memberBalances)
+      .filter(([memberId]) => memberId !== userId)
+      .reduce((sum, [, balance]) => sum + (balance < 0 ? Math.abs(balance) : 0), 0);
 
-      // Get all group members
-      const members = await prisma.groupMember.findMany({
-        where: {
-          groupId: groupId,
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
-        },
-      });
+    return {
+      groupId: group.id,
+      groupName: group.name,
+      totalOwed,
+      members: members
+        .filter((member) => member.user.id !== userId)
+        .map((member) => ({
+          userId: member.user.id,
+          name: member.user.name,
+          email: member.user.email,
+          balance: memberBalances[member.user.id] || 0,
+        })),
+    };
+  });
 
-      // Get all shared expenses in this group
-      const sharedExpenses = await prisma.sharedExpense.findMany({
-        where: {
-          groupId: groupId,
-        },
-        include: {
-          participants: true,
-        },
-      });
-
-      // Calculate balance for each member
-      const memberBalances: Record<string, number> = {};
-
-      // Initialize all members with 0 balance
-      members.forEach((member) => {
-        memberBalances[member.user.id] = 0;
-      });
-
-      // Calculate who owes whom
-      sharedExpenses.forEach((expense) => {
-        const paidBy = expense.paidByUserId;
-        const totalAmount = Number(expense.amount);
-
-        expense.participants.forEach((participant) => {
-          const amountOwed = Number(participant.amountOwed);
-
-          if (participant.userId === paidBy) {
-            // This person paid, so others owe them
-            // Their balance increases by what others owe them
-            memberBalances[participant.userId] += totalAmount - amountOwed;
-          } else {
-            // This person didn't pay, so they owe the payer
-            // Their balance decreases by what they owe
-            memberBalances[participant.userId] -= amountOwed;
-          }
-        });
-      });
-
-      // Calculate total owed TO the current user (positive balances of others = they owe me)
-      const totalOwed = Object.entries(memberBalances)
-        .filter(([memberId]) => memberId !== userId)
-        .reduce((sum, [, balance]) => sum + (balance < 0 ? Math.abs(balance) : 0), 0);
-
-      return {
-        groupId: group.id,
-        groupName: group.name,
-        totalOwed,
-        members: members
-          .filter((member) => member.user.id !== userId)
-          .map((member) => ({
-            userId: member.user.id,
-            name: member.user.name,
-            email: member.user.email,
-            balance: memberBalances[member.user.id] || 0,
-          })),
-      };
-    })
-  );
-
-  // Filter out null and groups with no balances
-  return groupBalances.filter((group): group is NonNullable<typeof group> =>
-    group !== null && (group.totalOwed > 0 || group.members.some((m) => m.balance !== 0))
+  // Filter out groups with no balances
+  return groupBalances.filter(
+    (group) => group.totalOwed > 0 || group.members.some((m) => m.balance !== 0)
   );
 };
 

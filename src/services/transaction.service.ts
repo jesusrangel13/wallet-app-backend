@@ -42,6 +42,9 @@ interface TransactionFilters {
   minAmount?: number;
   maxAmount?: number;
   tags?: string[];
+  search?: string; // Text search in description, payee, amount, category
+  sortBy?: 'date' | 'amount' | 'payee'; // Sort field
+  sortOrder?: 'asc' | 'desc'; // Sort direction
   page?: number;
   limit?: number;
 }
@@ -268,6 +271,25 @@ export const getTransactions = async (
     };
   }
 
+  // Text search in description, payee, amount, and category name
+  if (filters.search) {
+    const searchTerm = filters.search.trim();
+    const numericSearch = parseFloat(searchTerm);
+
+    where.OR = [
+      { description: { contains: searchTerm, mode: 'insensitive' } },
+      { payee: { contains: searchTerm, mode: 'insensitive' } },
+      // Search by amount if search term is numeric
+      ...(isNaN(numericSearch) ? [] : [{ amount: { equals: numericSearch } }]),
+      // Search by category name
+      {
+        category: {
+          name: { contains: searchTerm, mode: 'insensitive' },
+        },
+      },
+    ];
+  }
+
   // Pagination parameters
   const page = Math.max(filters.page || 1, 1);
   const limit = Math.min(filters.limit || 50, 500); // Max 500 per page
@@ -275,6 +297,14 @@ export const getTransactions = async (
 
   // Get total count for pagination
   const total = await prisma.transaction.count({ where });
+
+  // Determine sort order
+  let orderBy: any = { date: 'desc' }; // default
+  if (filters.sortBy && filters.sortOrder) {
+    orderBy = { [filters.sortBy]: filters.sortOrder };
+  } else if (filters.sortBy) {
+    orderBy = { [filters.sortBy]: 'desc' }; // default to desc if sortOrder not specified
+  }
 
   // Get paginated transactions
   const transactions = await prisma.transaction.findMany({
@@ -298,7 +328,7 @@ export const getTransactions = async (
         select: { id: true, description: true, groupId: true },
       },
     },
-    orderBy: { date: 'desc' },
+    orderBy,
     skip,
     take: limit,
   });

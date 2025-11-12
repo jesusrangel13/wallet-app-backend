@@ -55,6 +55,9 @@ export const getTransactions = async (
       minAmount: req.query.minAmount ? Number(req.query.minAmount) : undefined,
       maxAmount: req.query.maxAmount ? Number(req.query.maxAmount) : undefined,
       tags,
+      search: req.query.search as string, // Text search
+      sortBy: req.query.sortBy as 'date' | 'amount' | 'payee' | undefined, // Sort field
+      sortOrder: req.query.sortOrder as 'asc' | 'desc' | undefined, // Sort direction
       page: req.query.page ? Number(req.query.page) : 1,
       limit: req.query.limit ? Number(req.query.limit) : 50,
     };

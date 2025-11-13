@@ -52,7 +52,7 @@ async function cleanupLegacySystem() {
   // Check for transactions still using legacy categories
   const transactionsWithLegacy = await prisma.transaction.count({
     where: {
-      category: { id: { not: null } }
+      categoryId: { not: null }
     }
   })
 

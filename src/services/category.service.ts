@@ -6,8 +6,7 @@ import { UserCategoryService } from './userCategory.service';
 
 const prisma = new PrismaClient();
 
-// Feature flag: USE_CATEGORY_TEMPLATES (set via environment variable)
-const USE_CATEGORY_TEMPLATES = process.env.USE_CATEGORY_TEMPLATES === 'true';
+// Template-based category system is now the default system
 
 interface CreateCategoryData {
   name: string;
@@ -55,42 +54,17 @@ export const createCategory = async (userId: string, data: CreateCategoryData) =
 };
 
 export const getCategories = async (userId: string, type?: string) => {
-  // If using new template system, get categories from templates + overrides
-  if (USE_CATEGORY_TEMPLATES) {
-    try {
-      // Return new template-based system categories
-      if (type) {
-        return await UserCategoryService.getUserCategoriesByType(userId, type as TransactionType);
-      } else {
-        return await UserCategoryService.getUserCategoriesHierarchy(userId);
-      }
-    } catch (error) {
-      // Fallback to legacy system if template system fails
-      console.error('Error fetching template categories:', error);
+  // Template-based system: get categories from templates + overrides
+  try {
+    if (type) {
+      return await UserCategoryService.getUserCategoriesByType(userId, type as TransactionType);
+    } else {
+      return await UserCategoryService.getUserCategoriesHierarchy(userId);
     }
+  } catch (error) {
+    console.error('Error fetching template categories:', error);
+    throw error;
   }
-
-  // Legacy system: fetch from Category table
-  const whereClause: any = {
-    userId,
-    parentId: null, // Get only main categories
-  };
-
-  if (type) {
-    whereClause.type = type;
-  }
-
-  const categories = await prisma.category.findMany({
-    where: whereClause,
-    include: {
-      subcategories: {
-        orderBy: { name: 'asc' },
-      },
-    },
-    orderBy: { name: 'asc' },
-  });
-
-  return categories;
 };
 
 export const getCategoryById = async (userId: string, id: string) => {
@@ -183,58 +157,16 @@ export const deleteCategory = async (userId: string, id: string) => {
 
 /**
  * Create default categories for a new user
- * New template system: No categories created (templates are shared)
- * Legacy system: Creates both expense and income categories with their subcategories
+ * Template-based system: No categories created (templates are global and shared across users)
+ * This function is now a no-op since all users access the same shared category templates.
  */
 export const createDefaultCategoriesForUser = async (userId: string) => {
   try {
-    // New template system: Nothing to do - templates are global, shared across users
-    if (USE_CATEGORY_TEMPLATES) {
-      console.log(`ℹ️  User ${userId} will access category templates (no per-user categories created)`);
-      return true;
-    }
-
-    // Legacy system: Create per-user default categories
-    const allDefaultCategories = [
-      ...defaultExpenseCategories,
-      ...defaultIncomeCategories,
-    ];
-
-    // Create each main category with its subcategories
-    for (const defaultCategory of allDefaultCategories) {
-      // Create main category
-      const mainCategory = await prisma.category.create({
-        data: {
-          userId,
-          name: defaultCategory.name,
-          icon: defaultCategory.icon,
-          color: defaultCategory.color,
-          type: defaultCategory.type as TransactionType,
-        },
-      });
-
-      // Create subcategories if they exist
-      if (defaultCategory.subcategories && defaultCategory.subcategories.length > 0) {
-        for (const subcategory of defaultCategory.subcategories) {
-          await prisma.category.create({
-            data: {
-              userId,
-              name: subcategory.name,
-              icon: subcategory.icon,
-              color: subcategory.color,
-              type: subcategory.type as TransactionType,
-              parentId: mainCategory.id,
-            },
-          });
-        }
-      }
-    }
-
-    console.log(`✓ Default categories created for user ${userId}`);
+    console.log(`ℹ️  User ${userId} will access global category templates (no per-user categories created)`);
     return true;
   } catch (error) {
-    console.error(`Error creating default categories for user ${userId}:`, error);
-    // Don't throw - we don't want to block user registration if category creation fails
+    console.error(`Error in createDefaultCategoriesForUser for user ${userId}:`, error);
+    // Don't throw - we don't want to block user registration
     return false;
   }
 };

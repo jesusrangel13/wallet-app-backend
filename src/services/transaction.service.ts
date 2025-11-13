@@ -2,9 +2,7 @@ import { PrismaClient, TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { UserCategoryService } from './userCategory.service';
 
-// Feature flag: USE_CATEGORY_TEMPLATES (set via environment variable)
-const USE_CATEGORY_TEMPLATES = process.env.USE_CATEGORY_TEMPLATES === 'true';
-
+// Template-based category system is now the default system
 const prisma = new PrismaClient();
 
 interface CreateTransactionData {
@@ -244,30 +242,9 @@ export const getTransactions = async (
   }
 
   if (filters.categoryId) {
-    // Handle both legacy and new category systems
-    if (USE_CATEGORY_TEMPLATES) {
-      // New template system: categoryId refers to UserCategoryOverride or template
-      // For now, just use exact match - templates handle hierarchy internally
-      where.categoryId = filters.categoryId;
-    } else {
-      // Legacy system: Check if this category has subcategories (is a parent category)
-      const selectedCategory = await prisma.category.findUnique({
-        where: { id: filters.categoryId },
-        include: { subcategories: { select: { id: true } } }
-      });
-
-      if (selectedCategory?.subcategories && selectedCategory.subcategories.length > 0) {
-        // Parent category: include this category AND all its subcategories
-        const subcategoryIds = selectedCategory.subcategories.map(sub => sub.id);
-        where.OR = [
-          { categoryId: filters.categoryId },
-          { categoryId: { in: subcategoryIds } }
-        ];
-      } else {
-        // Child category or category without subcategories: exact match
-        where.categoryId = filters.categoryId;
-      }
-    }
+    // Template system: categoryId refers to UserCategoryOverride or template
+    // Use exact match - templates handle hierarchy internally
+    where.categoryId = filters.categoryId;
   }
 
   if (filters.startDate || filters.endDate) {

@@ -71,11 +71,11 @@ export const getUserCategories = async (
   next: NextFunction
 ) => {
   try {
-    if (!req.userId) {
+    if (!req.user?.userId) {
       throw new AppError('User not authenticated', 401);
     }
 
-    const categories = await UserCategoryService.getUserCategoriesHierarchy(req.userId);
+    const categories = await UserCategoryService.getUserCategoriesHierarchy(req.user.userId);
     res.json({
       success: true,
       data: categories,
@@ -96,7 +96,7 @@ export const createCategoryOverride = async (
   next: NextFunction
 ) => {
   try {
-    if (!req.userId) {
+    if (!req.user?.userId) {
       throw new AppError('User not authenticated', 401);
     }
 
@@ -111,7 +111,7 @@ export const createCategoryOverride = async (
     }
 
     const override = await UserCategoryService.overrideTemplateCategory(
-      req.userId,
+      req.user.userId,
       templateId,
       { name, icon, color }
     );
@@ -136,12 +136,12 @@ export const getCategoryOverride = async (
   next: NextFunction
 ) => {
   try {
-    if (!req.userId) {
+    if (!req.user?.userId) {
       throw new AppError('User not authenticated', 401);
     }
 
     const { id } = req.params;
-    const override = await UserCategoryService.getUserCategory(req.userId, id);
+    const override = await UserCategoryService.getUserCategory(req.user.userId, id);
 
     res.json({
       success: true,
@@ -162,7 +162,7 @@ export const updateCategoryOverride = async (
   next: NextFunction
 ) => {
   try {
-    if (!req.userId) {
+    if (!req.user?.userId) {
       throw new AppError('User not authenticated', 401);
     }
 
@@ -174,7 +174,7 @@ export const updateCategoryOverride = async (
     }
 
     const updated = await UserCategoryService.updateCustomCategory(
-      req.userId,
+      req.user.userId,
       id,
       { name, icon, color }
     );
@@ -199,14 +199,14 @@ export const deleteCategoryOverride = async (
   next: NextFunction
 ) => {
   try {
-    if (!req.userId) {
+    if (!req.user?.userId) {
       throw new AppError('User not authenticated', 401);
     }
 
     const { id } = req.params;
 
     // Check if this is a template override (deactivate) or custom (delete)
-    const category = await UserCategoryService.getUserCategory(req.userId, id);
+    const category = await UserCategoryService.getUserCategory(req.user.userId, id);
 
     if (!category) {
       throw new AppError('Category not found', 404);
@@ -214,14 +214,14 @@ export const deleteCategoryOverride = async (
 
     if (category.templateId) {
       // It's a template override - deactivate it instead of delete
-      await UserCategoryService.toggleCategoryActive(req.userId, id, false);
+      await UserCategoryService.toggleCategoryActive(req.user.userId, id, false);
       res.json({
         success: true,
         message: 'Category deactivated successfully',
       });
     } else {
       // It's a custom category - delete it
-      await UserCategoryService.deleteCustomCategory(req.userId, id);
+      await UserCategoryService.deleteCustomCategory(req.user.userId, id);
       res.json({
         success: true,
         message: 'Custom category deleted successfully',
@@ -242,7 +242,7 @@ export const createCustomCategory = async (
   next: NextFunction
 ) => {
   try {
-    if (!req.userId) {
+    if (!req.user?.userId) {
       throw new AppError('User not authenticated', 401);
     }
 
@@ -257,7 +257,7 @@ export const createCustomCategory = async (
     }
 
     const customCategory = await UserCategoryService.createCustomCategory(
-      req.userId,
+      req.user.userId,
       { name, icon, color, type: type as TransactionType }
     );
 
@@ -281,12 +281,12 @@ export const getUserCustomCategories = async (
   next: NextFunction
 ) => {
   try {
-    if (!req.userId) {
+    if (!req.user?.userId) {
       throw new AppError('User not authenticated', 401);
     }
 
     const customCategories = await UserCategoryService.getUserCategoriesFlat(
-      req.userId
+      req.user.userId
     );
 
     const filtered = customCategories.filter((cat) => cat.isCustom);

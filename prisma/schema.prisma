@@ -167,6 +167,7 @@ model UserCategoryOverride {
   id                 String   @id @default(uuid())
   userId             String   @map("user_id")
   templateId         String?  @map("template_id") // NULL if fully custom category
+  parentOverrideId   String?  @map("parent_override_id") // For custom subcategories
   name               String   // User's version (can override template name)
   icon               String?  // User's version (can override template icon)
   color              String?  // User's version (can override template color)
@@ -179,9 +180,12 @@ model UserCategoryOverride {
   // Relations
   user               User     @relation("UserCategoryOverrides", fields: [userId], references: [id], onDelete: Cascade)
   template           CategoryTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  parent             UserCategoryOverride?  @relation("CustomCategoryHierarchy", fields: [parentOverrideId], references: [id], onDelete: Cascade)
+  subcategories      UserCategoryOverride[] @relation("CustomCategoryHierarchy")
 
   @@index([userId])
   @@index([templateId])
+  @@index([parentOverrideId])
   @@index([isActive])
   @@index([type])
   @@unique([userId, templateId]) // One override per template per user

@@ -28,15 +28,25 @@ export class UserCategoryService {
       // Obtener templates
       const templates = await CategoryTemplateService.getAllTemplatesHierarchy();
 
-      // Obtener overrides del usuario
+      // Obtener overrides y custom categories con subcategorías
       const overrides = await prisma.userCategoryOverride.findMany({
         where: { userId },
+        include: {
+          subcategories: true,
+        },
       });
 
       const overridesByTemplateId = new Map<string, any>();
+      const customCategoriesById = new Map<string, any>();
+
       overrides.forEach(o => {
         const key = o.templateId || `custom_${o.id}`;
         overridesByTemplateId.set(key, o);
+
+        // Si es custom y no tiene parent, almacenarla para procesamiento posterior
+        if (o.templateId === null && o.isCustom && !o.parentOverrideId) {
+          customCategoriesById.set(o.id, o);
+        }
       });
 
       // Merge templates con overrides
@@ -49,22 +59,10 @@ export class UserCategoryService {
         return override?.isActive !== false;
       });
 
-      // Agregar categorías custom standalone (sin template)
+      // Agregar categorías custom standalone (sin template, sin parent)
       const customCategories = overrides
-        .filter(o => o.templateId === null && o.isCustom && o.isActive)
-        .map(custom => ({
-          id: custom.id,
-          templateId: null,
-          name: custom.name,
-          icon: custom.icon,
-          color: custom.color,
-          type: custom.type || ('EXPENSE' as TransactionType),
-          orderIndex: 0,
-          isActive: custom.isActive,
-          isCustom: true,
-          isTemplate: false,
-          subcategories: [],
-        }));
+        .filter(o => o.templateId === null && o.isCustom && !o.parentOverrideId && o.isActive)
+        .map(custom => this.mergeCustomCategory(custom, overrides));
 
       return [...mergedTemplates, ...customCategories];
     } catch (error) {
@@ -178,6 +176,7 @@ export class UserCategoryService {
 
   /**
    * Crea una categoría custom completamente nueva (sin template)
+   * Puede ser subcategoría de otra custom si se proporciona parentId
    */
   static async createCustomCategory(
     userId: string,
@@ -186,15 +185,27 @@ export class UserCategoryService {
       icon?: string;
       color?: string;
       type?: TransactionType;
+      parentId?: string; // Para subcategorías
     }
   ): Promise<any> {
     try {
-      // Validar nombre único por usuario
+      // Si tiene parentId, delegar al método específico de subcategorías
+      if (data.parentId) {
+        return await this.createCustomSubcategory(userId, data.parentId, {
+          name: data.name,
+          icon: data.icon,
+          color: data.color,
+          type: data.type,
+        });
+      }
+
+      // Validar nombre único por usuario (solo para categorías de nivel superior)
       const existing = await prisma.userCategoryOverride.findFirst({
         where: {
           userId,
           name: data.name,
           isCustom: true,
+          parentOverrideId: null,
         },
       });
 
@@ -215,6 +226,7 @@ export class UserCategoryService {
         },
       });
     } catch (error: any) {
+      if (error instanceof AppError) throw error;
       if (error.code === 'P2002') {
         throw new AppError('Category with this name already exists', 400);
       }
@@ -410,6 +422,97 @@ export class UserCategoryService {
       console.error(`Error deleting category ${categoryId}:`, error);
       throw new AppError('Failed to delete category', 500);
     }
+  }
+
+  /**
+   * Crea una subcategoría custom dentro de una categoría (template o custom)
+   */
+  static async createCustomSubcategory(
+    userId: string,
+    parentId: string,
+    data: {
+      name: string;
+      icon?: string;
+      color?: string;
+      type?: TransactionType;
+    }
+  ): Promise<any> {
+    try {
+      // Obtener la categoría padre para validar
+      const parent = await prisma.userCategoryOverride.findUnique({
+        where: { id: parentId },
+      });
+
+      if (!parent || parent.userId !== userId) {
+        throw new AppError('Parent category not found', 404);
+      }
+
+      // Validar que la subcategoría sea del mismo tipo
+      const parentType = parent.type || ('EXPENSE' as TransactionType);
+      const childType = data.type || parentType;
+
+      if (childType !== parentType) {
+        throw new AppError('Subcategory must be same type as parent', 400);
+      }
+
+      // Validar nombre único dentro del parent
+      const existing = await prisma.userCategoryOverride.findFirst({
+        where: {
+          userId,
+          name: data.name,
+          parentOverrideId: parentId,
+        },
+      });
+
+      if (existing) {
+        throw new AppError('Subcategory with this name already exists in this category', 400);
+      }
+
+      return await prisma.userCategoryOverride.create({
+        data: {
+          userId,
+          parentOverrideId: parentId,
+          name: data.name,
+          icon: data.icon || null,
+          color: data.color || null,
+          type: childType,
+          isCustom: true,
+          isActive: true,
+          templateId: null,
+        },
+      });
+    } catch (error: any) {
+      if (error instanceof AppError) throw error;
+      console.error(`Error creating custom subcategory for ${userId}:`, error);
+      throw new AppError('Failed to create subcategory', 500);
+    }
+  }
+
+  /**
+   * Helper para convertir una categoría custom a MergedCategory incluyendo subcategorías
+   */
+  private static mergeCustomCategory(
+    custom: any,
+    allOverrides: any[]
+  ): MergedCategory {
+    // Obtener subcategorías de esta categoría custom
+    const subcategories = allOverrides
+      .filter(o => o.parentOverrideId === custom.id && o.isActive)
+      .map(sub => this.mergeCustomCategory(sub, allOverrides));
+
+    return {
+      id: custom.id,
+      templateId: null,
+      name: custom.name,
+      icon: custom.icon,
+      color: custom.color,
+      type: custom.type || ('EXPENSE' as TransactionType),
+      orderIndex: 0,
+      isActive: custom.isActive,
+      isCustom: true,
+      isTemplate: false,
+      subcategories,
+    };
   }
 
   /**

@@ -170,6 +170,7 @@ model UserCategoryOverride {
   name               String   // User's version (can override template name)
   icon               String?  // User's version (can override template icon)
   color              String?  // User's version (can override template color)
+  type               TransactionType // EXPENSE, INCOME, or TRANSFER (required for all overrides)
   isActive           Boolean  @default(true) @map("is_active") // User can deactivate defaults
   isCustom           Boolean  @default(false) @map("is_custom") // True if created by user, not from template
   createdAt          DateTime @default(now()) @map("created_at")
@@ -182,6 +183,7 @@ model UserCategoryOverride {
   @@index([userId])
   @@index([templateId])
   @@index([isActive])
+  @@index([type])
   @@unique([userId, templateId]) // One override per template per user
   @@map("user_category_overrides")
 }

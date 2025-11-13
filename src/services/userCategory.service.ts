@@ -40,7 +40,7 @@ export class UserCategoryService {
       });
 
       // Merge templates con overrides
-      return templates.map(template =>
+      const mergedTemplates = templates.map(template =>
         this.mergeTemplate(template, overridesByTemplateId, userId)
       ).filter(cat => {
         // Filtrar categorías inactivas (desactivadas por usuario)
@@ -48,6 +48,25 @@ export class UserCategoryService {
         const override = overridesByTemplateId.get(cat.templateId);
         return override?.isActive !== false;
       });
+
+      // Agregar categorías custom standalone (sin template)
+      const customCategories = overrides
+        .filter(o => o.templateId === null && o.isCustom && o.isActive)
+        .map(custom => ({
+          id: custom.id,
+          templateId: null,
+          name: custom.name,
+          icon: custom.icon,
+          color: custom.color,
+          type: custom.type || ('EXPENSE' as TransactionType),
+          orderIndex: 0,
+          isActive: custom.isActive,
+          isCustom: true,
+          isTemplate: false,
+          subcategories: [],
+        }));
+
+      return [...mergedTemplates, ...customCategories];
     } catch (error) {
       console.error(`Error fetching user categories for ${userId}:`, error);
       throw new AppError('Failed to fetch user categories', 500);
@@ -106,7 +125,7 @@ export class UserCategoryService {
             name: override.name,
             icon: override.icon,
             color: override.color,
-            type: 'EXPENSE' as TransactionType, // Default type para custom
+            type: override.type || ('EXPENSE' as TransactionType),
             orderIndex: 0,
             isActive: override.isActive,
             isCustom: true,
@@ -189,6 +208,7 @@ export class UserCategoryService {
           name: data.name,
           icon: data.icon || null,
           color: data.color || null,
+          type: data.type || 'EXPENSE',
           isCustom: true,
           isActive: true,
           templateId: null,
@@ -313,6 +333,7 @@ export class UserCategoryService {
             name: data.name || template.name,
             icon: data.icon !== undefined ? data.icon : template.icon,
             color: data.color !== undefined ? data.color : template.color,
+            type: template.type,
             isActive: true,
             isCustom: false,
           },

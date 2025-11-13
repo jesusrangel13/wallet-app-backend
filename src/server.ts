@@ -19,6 +19,7 @@ import importRoutes from './routes/import.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import notificationRoutes from './routes/notification.routes';
 import dashboardPreferenceRoutes from './routes/dashboardPreference.routes';
+import { CategoryTemplateService } from './services/categoryTemplate.service';
 
 // Load environment variables
 dotenv.config();
@@ -84,6 +85,16 @@ app.use('/api/users', dashboardPreferenceRoutes);
 // Error handling
 app.use(notFoundHandler);
 app.use(errorHandler);
+
+// Initialize category templates (idempotent operation)
+(async () => {
+  try {
+    await CategoryTemplateService.initializeDefaultTemplates();
+  } catch (error) {
+    console.error('⚠️  Failed to initialize category templates:', error);
+    // Don't block server startup if this fails
+  }
+})();
 
 // Start server
 app.listen(PORT, () => {

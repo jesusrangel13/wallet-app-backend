@@ -80,12 +80,26 @@ export const createTransaction = async (
   }
 
   // Verify category if provided
+  // Categories can come from: CategoryTemplate, UserCategoryOverride, or legacy Category
   if (data.categoryId) {
-    const category = await prisma.category.findFirst({
+    // Try to find in new template-based system first
+    const templateCategory = await prisma.categoryTemplate.findUnique({
+      where: { id: data.categoryId },
+    });
+
+    // Check if it's a user override or custom category
+    const userCategory = await prisma.userCategoryOverride.findFirst({
+      where: { id: data.categoryId, userId, isActive: true },
+    });
+
+    // Also check legacy categories for backward compatibility
+    const legacyCategory = await prisma.category.findFirst({
       where: { id: data.categoryId, userId },
     });
 
-    if (!category) {
+    if (!templateCategory && !userCategory && !legacyCategory) {
+      console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
+      console.error(`   Template found: ${!!templateCategory}, Override found: ${!!userCategory}, Legacy found: ${!!legacyCategory}`);
       throw new AppError('Category not found', 404);
     }
   }
@@ -493,12 +507,26 @@ export const updateTransaction = async (
   }
 
   // Verify category if provided
+  // Categories can come from: CategoryTemplate, UserCategoryOverride, or legacy Category
   if (data.categoryId) {
-    const category = await prisma.category.findFirst({
+    // Try to find in new template-based system first
+    const templateCategory = await prisma.categoryTemplate.findUnique({
+      where: { id: data.categoryId },
+    });
+
+    // Check if it's a user override or custom category
+    const userCategory = await prisma.userCategoryOverride.findFirst({
+      where: { id: data.categoryId, userId, isActive: true },
+    });
+
+    // Also check legacy categories for backward compatibility
+    const legacyCategory = await prisma.category.findFirst({
       where: { id: data.categoryId, userId },
     });
 
-    if (!category) {
+    if (!templateCategory && !userCategory && !legacyCategory) {
+      console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
+      console.error(`   Template found: ${!!templateCategory}, Override found: ${!!userCategory}, Legacy found: ${!!legacyCategory}`);
       throw new AppError('Category not found', 404);
     }
   }

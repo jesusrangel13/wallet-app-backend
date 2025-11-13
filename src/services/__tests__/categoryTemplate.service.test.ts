@@ -122,8 +122,11 @@ describe('CategoryTemplateService', () => {
 
       if (parentTemplate) {
         const fetched = await CategoryTemplateService.getTemplateById(parentTemplate.id)
-        expect(fetched.id).toBe(parentTemplate.id)
-        expect(fetched.name).toBe(parentTemplate.name)
+        expect(fetched).not.toBeNull()
+        if (fetched) {
+          expect(fetched.id).toBe(parentTemplate.id)
+          expect(fetched.name).toBe(parentTemplate.name)
+        }
       }
     })
   })

@@ -15,6 +15,7 @@ export interface CategoryTemplateHierarchy {
   color: string | null;
   type: TransactionType;
   orderIndex: number;
+  parentTemplateId?: string | null;
   subcategories: CategoryTemplateHierarchy[];
 }
 
@@ -225,6 +226,7 @@ export class CategoryTemplateService {
       color: template.color,
       type: template.type,
       orderIndex: template.orderIndex,
+      parentTemplateId: template.parentTemplateId || null,
       subcategories: template.subcategories?.map((sub: any) =>
         this.mapToHierarchy(sub)
       ) || [],

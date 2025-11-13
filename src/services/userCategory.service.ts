@@ -33,9 +33,10 @@ export class UserCategoryService {
         where: { userId },
       });
 
-      const overridesByTemplateId = new Map<string | null, any>();
+      const overridesByTemplateId = new Map<string, any>();
       overrides.forEach(o => {
-        overridesByTemplateId.set(o.templateId || `custom_${o.id}`, o);
+        const key = o.templateId || `custom_${o.id}`;
+        overridesByTemplateId.set(key, o);
       });
 
       // Merge templates con overrides
@@ -43,6 +44,7 @@ export class UserCategoryService {
         this.mergeTemplate(template, overridesByTemplateId, userId)
       ).filter(cat => {
         // Filtrar categorías inactivas (desactivadas por usuario)
+        if (!cat.templateId) return true;
         const override = overridesByTemplateId.get(cat.templateId);
         return override?.isActive !== false;
       });

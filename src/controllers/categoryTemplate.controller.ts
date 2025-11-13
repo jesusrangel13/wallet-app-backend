@@ -208,6 +208,10 @@ export const deleteCategoryOverride = async (
     // Check if this is a template override (deactivate) or custom (delete)
     const category = await UserCategoryService.getUserCategory(req.userId, id);
 
+    if (!category) {
+      throw new AppError('Category not found', 404);
+    }
+
     if (category.templateId) {
       // It's a template override - deactivate it instead of delete
       await UserCategoryService.toggleCategoryActive(req.userId, id, false);

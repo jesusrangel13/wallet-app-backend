@@ -51,7 +51,7 @@ export class UserCategoryService {
 
       // Merge templates con overrides
       const mergedTemplates = templates.map(template =>
-        this.mergeTemplate(template, overridesByTemplateId, userId)
+        this.mergeTemplate(template, overridesByTemplateId, userId, overrides)
       ).filter(cat => {
         // Filtrar categorías inactivas (desactivadas por usuario)
         if (!cat.templateId) return true;
@@ -561,13 +561,32 @@ export class UserCategoryService {
 
   /**
    * Helper para mergear template con override
+   * Incluye subcategorías del template y custom subcategorías creadas bajo el template
    */
   private static mergeTemplate(
     template: any,
     overridesByTemplateId: Map<string, any>,
-    userId: string
+    userId: string,
+    allOverrides: any[] = []
   ): MergedCategory {
     const override = overridesByTemplateId.get(template.id);
+
+    // Merge template subcategories
+    const templateSubcategories = template.subcategories?.map((sub: any) =>
+      this.mergeTemplate(sub, overridesByTemplateId, userId, allOverrides)
+    ) || [];
+
+    // Si este es un template padre (no una subcategoría de template), agregar custom subcategorías creadas bajo él
+    const customSubcategories: MergedCategory[] = [];
+    if (override && !template.parentTemplateId) {
+      // Buscar custom subcategorías que fueron creadas bajo este override
+      const customSubs = allOverrides.filter(
+        o => o.parentOverrideId === override.id && o.isActive && o.isCustom
+      );
+      customSubcategories.push(
+        ...customSubs.map(sub => this.mergeCustomCategory(sub, allOverrides))
+      );
+    }
 
     const merged: MergedCategory = {
       id: override?.id || template.id,
@@ -580,9 +599,7 @@ export class UserCategoryService {
       isActive: override?.isActive !== false,
       isCustom: false,
       isTemplate: !override,
-      subcategories: template.subcategories?.map((sub: any) =>
-        this.mergeTemplate(sub, overridesByTemplateId, userId)
-      ) || [],
+      subcategories: [...templateSubcategories, ...customSubcategories],
     };
 
     return merged;

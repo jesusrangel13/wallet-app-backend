@@ -246,7 +246,7 @@ export const createCustomCategory = async (
       throw new AppError('User not authenticated', 401);
     }
 
-    const { name, icon, color, type } = req.body;
+    const { name, icon, color, type, parentId } = req.body;
 
     if (!name) {
       throw new AppError('name is required', 400);
@@ -258,7 +258,7 @@ export const createCustomCategory = async (
 
     const customCategory = await UserCategoryService.createCustomCategory(
       req.user.userId,
-      { name, icon, color, type: type as TransactionType }
+      { name, icon, color, type: type as TransactionType, parentId }
     );
 
     res.status(201).json({

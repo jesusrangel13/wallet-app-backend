@@ -426,6 +426,7 @@ export class UserCategoryService {
 
   /**
    * Crea una subcategoría custom dentro de una categoría (template o custom)
+   * Option B: Soporta crear subcategorías bajo templates automáticamente creando un override
    */
   static async createCustomSubcategory(
     userId: string,
@@ -438,17 +439,60 @@ export class UserCategoryService {
     }
   ): Promise<any> {
     try {
-      // Obtener la categoría padre para validar
-      const parent = await prisma.userCategoryOverride.findUnique({
+      let parentOverride: any = null;
+      let parentType: TransactionType = 'EXPENSE';
+
+      // Paso 1: Buscar la categoría padre en UserCategoryOverride (custom parent)
+      const customParent = await prisma.userCategoryOverride.findUnique({
         where: { id: parentId },
       });
 
-      if (!parent || parent.userId !== userId) {
-        throw new AppError('Parent category not found', 404);
+      if (customParent) {
+        // Es una categoría custom del usuario
+        if (customParent.userId !== userId) {
+          throw new AppError('Unauthorized', 403);
+        }
+        parentOverride = customParent;
+        parentType = customParent.type || ('EXPENSE' as TransactionType);
+      } else {
+        // Paso 2: Si no existe en overrides, buscar en CategoryTemplate
+        const templateParent = await CategoryTemplateService.getTemplateById(parentId);
+
+        if (!templateParent) {
+          throw new AppError('Parent category not found', 404);
+        }
+
+        // Es un template - crear un override automáticamente para usarlo como padre
+        parentType = templateParent.type;
+
+        // Verificar si ya existe un override para este template del usuario
+        const existingOverride = await prisma.userCategoryOverride.findFirst({
+          where: {
+            userId,
+            templateId: parentId,
+          },
+        });
+
+        if (existingOverride) {
+          parentOverride = existingOverride;
+        } else {
+          // Crear un nuevo override del template
+          parentOverride = await prisma.userCategoryOverride.create({
+            data: {
+              userId,
+              templateId: parentId,
+              name: templateParent.name,
+              icon: templateParent.icon,
+              color: templateParent.color,
+              type: templateParent.type,
+              isActive: true,
+              isCustom: false,
+            },
+          });
+        }
       }
 
       // Validar que la subcategoría sea del mismo tipo
-      const parentType = parent.type || ('EXPENSE' as TransactionType);
       const childType = data.type || parentType;
 
       if (childType !== parentType) {
@@ -460,7 +504,7 @@ export class UserCategoryService {
         where: {
           userId,
           name: data.name,
-          parentOverrideId: parentId,
+          parentOverrideId: parentOverride.id,
         },
       });
 
@@ -471,7 +515,7 @@ export class UserCategoryService {
       return await prisma.userCategoryOverride.create({
         data: {
           userId,
-          parentOverrideId: parentId,
+          parentOverrideId: parentOverride.id,
           name: data.name,
           icon: data.icon || null,
           color: data.color || null,

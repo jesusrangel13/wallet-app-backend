@@ -21,6 +21,7 @@ const baseAccountSchema = z.object({
   balance: z.number().default(0),
   currency: z.enum(['CLP', 'USD', 'EUR']).default('CLP'),
   isDefault: z.boolean().optional().default(false),
+  includeInTotalBalance: z.boolean().optional().default(true),
   // Credit card specific fields
   creditLimit: z.number().positive().optional(),
   billingDay: z.number().min(1).max(31).optional(),
@@ -42,17 +43,6 @@ export const createAccountSchema = baseAccountSchema.refine(
 
 export const updateAccountSchema = baseAccountSchema.partial();
 
-// Category schemas
-export const createCategorySchema = z.object({
-  name: z.string().min(1, 'Category name is required'),
-  icon: z.string().optional(),
-  color: z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, 'Invalid color format').optional(),
-  type: z.enum(['EXPENSE', 'INCOME', 'TRANSFER']),
-  parentId: z.string().uuid().optional(), // For subcategories
-});
-
-export const updateCategorySchema = createCategorySchema.partial();
-
 // Tag schemas
 export const createTagSchema = z.object({
   name: z.string().min(1, 'Tag name is required').max(50, 'Tag name too long'),
@@ -73,7 +63,7 @@ const baseTransactionSchema = z.object({
   payee: z.string().optional(), // Who received the payment
   payer: z.string().optional(), // Who made the payment
   toAccountId: z.string().uuid('Invalid destination account ID').optional(), // For transfers
-  sharedExpenseId: z.string().uuid('Invalid shared expense ID').optional(),
+  sharedExpenseId: z.string().uuid('Invalid shared expense ID').nullish(),
   tags: z.array(z.string().uuid()).optional(), // Array of tag IDs
 });
 
@@ -105,6 +95,20 @@ export const createGroupSchema = z.object({
   name: z.string().min(1, 'Group name is required'),
   description: z.string().optional(),
   coverImageUrl: z.string().optional().or(z.literal('')).optional(), // Can be emoji or URL
+  // New fields for single-step creation
+  memberEmails: z.array(z.string().email()).optional(), // Emails of members to add
+  defaultSplitType: z.enum(['EQUAL', 'PERCENTAGE', 'SHARES', 'EXACT']).optional(),
+  // Split configuration per member (using email as identifier)
+  memberSplitSettings: z
+    .array(
+      z.object({
+        email: z.string().email(),
+        percentage: z.number().min(0).max(100).optional(),
+        shares: z.number().int().positive().optional(),
+        exactAmount: z.number().positive().optional(),
+      })
+    )
+    .optional(),
 });
 
 export const updateGroupSchema = createGroupSchema.partial();

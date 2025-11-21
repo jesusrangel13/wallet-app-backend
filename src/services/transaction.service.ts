@@ -1,6 +1,12 @@
 import { PrismaClient, TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { UserCategoryService } from './userCategory.service';
+import {
+  resolveCategoryById,
+  resolveCategoriesBatch,
+  validateCategoryId,
+  searchCategoriesByName,
+} from './categoryResolver.service';
 
 // Template-based category system is now the default system
 const prisma = new PrismaClient();
@@ -16,7 +22,7 @@ interface CreateTransactionData {
   payee?: string;
   payer?: string;
   toAccountId?: string; // For transfers
-  sharedExpenseId?: string;
+  sharedExpenseId?: string | null;
   tags?: string[]; // Array of tag IDs
 }
 
@@ -31,7 +37,7 @@ interface UpdateTransactionData {
   payee?: string;
   payer?: string;
   toAccountId?: string;
-  sharedExpenseId?: string;
+  sharedExpenseId?: string | null;
   tags?: string[];
 }
 
@@ -64,55 +70,53 @@ export const createTransaction = async (
   userId: string,
   data: CreateTransactionData
 ) => {
-  // Get user info for default payer
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { name: true },
-  });
+  // OPTIMIZATION: Parallelize all validation queries using Promise.all
+  const [user, account, categoryInfo, toAccount, tags] = await Promise.all([
+    // Get user info for default payer
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    }),
 
-  // Verify account belongs to user
-  const account = await prisma.account.findFirst({
-    where: { id: data.accountId, userId },
-  });
+    // Verify account belongs to user
+    prisma.account.findFirst({
+      where: { id: data.accountId, userId },
+    }),
 
+    // Verify and resolve category if provided (combined operation)
+    data.categoryId
+      ? resolveCategoryById(data.categoryId, userId)
+      : Promise.resolve(null),
+
+    // For transfers, verify toAccount
+    data.type === 'TRANSFER' && data.toAccountId
+      ? prisma.account.findFirst({
+          where: { id: data.toAccountId, userId },
+        })
+      : Promise.resolve(null),
+
+    // Verify tags if provided
+    data.tags && data.tags.length > 0
+      ? prisma.tag.findMany({
+          where: { id: { in: data.tags }, userId },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  // Validate results
   if (!account) {
     throw new AppError('Account not found', 404);
   }
 
-  // Verify category if provided
-  // Categories can come from: CategoryTemplate, UserCategoryOverride, or legacy Category
-  if (data.categoryId) {
-    // Try to find in new template-based system first
-    const templateCategory = await prisma.categoryTemplate.findUnique({
-      where: { id: data.categoryId },
-    });
-
-    // Check if it's a user override or custom category
-    const userCategory = await prisma.userCategoryOverride.findFirst({
-      where: { id: data.categoryId, userId, isActive: true },
-    });
-
-    // Also check legacy categories for backward compatibility
-    const legacyCategory = await prisma.category.findFirst({
-      where: { id: data.categoryId, userId },
-    });
-
-    if (!templateCategory && !userCategory && !legacyCategory) {
-      console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
-      console.error(`   Template found: ${!!templateCategory}, Override found: ${!!userCategory}, Legacy found: ${!!legacyCategory}`);
-      throw new AppError('Category not found', 404);
-    }
+  if (data.categoryId && !categoryInfo) {
+    console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
+    throw new AppError('Category not found', 404);
   }
 
-  // For transfers, verify toAccount
   if (data.type === 'TRANSFER') {
     if (!data.toAccountId) {
       throw new AppError('Destination account is required for transfers', 400);
     }
-
-    const toAccount = await prisma.account.findFirst({
-      where: { id: data.toAccountId, userId },
-    });
 
     if (!toAccount) {
       throw new AppError('Destination account not found', 404);
@@ -124,70 +128,78 @@ export const createTransaction = async (
     }
   }
 
-  // Verify tags if provided
-  if (data.tags && data.tags.length > 0) {
-    const tags = await prisma.tag.findMany({
-      where: { id: { in: data.tags }, userId },
-    });
-
-    if (tags.length !== data.tags.length) {
-      throw new AppError('One or more tags not found', 404);
-    }
+  if (data.tags && data.tags.length > 0 && tags.length !== data.tags.length) {
+    throw new AppError('One or more tags not found', 404);
   }
 
-  // Create transaction with tags
-  const transaction = await prisma.transaction.create({
-    data: {
-      userId,
-      accountId: data.accountId,
-      type: data.type,
-      amount: data.amount,
-      categoryId: data.categoryId,
-      description: data.description,
-      date: data.date ? new Date(data.date) : new Date(),
-      receiptUrl: data.receiptUrl,
-      payee: data.payee,
-      payer: data.payer || user?.name, // Default to user's name
-      toAccountId: data.toAccountId,
-      sharedExpenseId: data.sharedExpenseId,
-      tags: data.tags
-        ? {
-            create: data.tags.map((tagId) => ({
-              tag: { connect: { id: tagId } },
-            })),
-          }
-        : undefined,
-    },
-    include: {
-      category: true,
-      tags: {
-        include: {
-          tag: true,
+  // OPTIMIZATION: Use database transaction for atomicity and batch balance updates
+  const result = await prisma.$transaction(async (tx) => {
+    // Create transaction with tags
+    const transaction = await tx.transaction.create({
+      data: {
+        userId,
+        accountId: data.accountId,
+        type: data.type,
+        amount: data.amount,
+        categoryId: data.categoryId,
+        description: data.description,
+        date: data.date ? new Date(data.date) : new Date(),
+        receiptUrl: data.receiptUrl,
+        payee: data.payee,
+        payer: data.payer || user?.name, // Default to user's name
+        toAccountId: data.toAccountId,
+        sharedExpenseId: data.sharedExpenseId,
+        tags: data.tags
+          ? {
+              create: data.tags.map((tagId) => ({
+                tag: { connect: { id: tagId } },
+              })),
+            }
+          : undefined,
+      },
+      include: {
+        tags: {
+          include: {
+            tag: true,
+          },
+        },
+        account: {
+          select: { name: true, currency: true, type: true },
+        },
+        toAccount: {
+          select: { name: true, currency: true },
         },
       },
-      account: {
-        select: { name: true, currency: true, type: true },
-      },
-      toAccount: {
-        select: { name: true, currency: true },
-      },
-    },
+    });
+
+    // Calculate balance changes
+    let balanceChange = data.amount;
+    if (account.type === 'CREDIT') {
+      balanceChange = data.type === 'INCOME' ? data.amount : -data.amount;
+    } else {
+      balanceChange = data.type === 'INCOME' ? data.amount : -data.amount;
+    }
+
+    // Update source account balance
+    await tx.account.update({
+      where: { id: account.id },
+      data: { balance: { increment: balanceChange } },
+    });
+
+    // For transfers, update destination account balance
+    if (data.type === 'TRANSFER' && toAccount) {
+      const toBalanceChange = toAccount.type === 'CREDIT' ? data.amount : data.amount;
+      await tx.account.update({
+        where: { id: toAccount.id },
+        data: { balance: { increment: toBalanceChange } },
+      });
+    }
+
+    return transaction;
   });
 
-  // Update account balance based on transaction type and account type
-  await updateAccountBalance(account.id, account.type, data.type, data.amount, 'add');
-
-  // For transfers, update destination account
-  if (data.type === 'TRANSFER' && data.toAccountId) {
-    const toAccount = await prisma.account.findUnique({
-      where: { id: data.toAccountId },
-    });
-    if (toAccount) {
-      await updateAccountBalance(toAccount.id, toAccount.type, 'INCOME', data.amount, 'add');
-    }
-  }
-
-  return transaction;
+  // OPTIMIZATION: Return category info resolved during validation (no redundant DB query)
+  return { ...result, category: categoryInfo };
 };
 
 // Helper function to update account balance considering credit cards
@@ -294,17 +306,18 @@ export const getTransactions = async (
     const searchTerm = filters.search.trim();
     const numericSearch = parseFloat(searchTerm);
 
+    // Get category IDs that match the search term
+    const matchingCategoryIds = await searchCategoriesByName(searchTerm, userId);
+
     where.OR = [
       { description: { contains: searchTerm, mode: 'insensitive' } },
       { payee: { contains: searchTerm, mode: 'insensitive' } },
       // Search by amount if search term is numeric
       ...(isNaN(numericSearch) ? [] : [{ amount: { equals: numericSearch } }]),
-      // Search by category name
-      {
-        category: {
-          name: { contains: searchTerm, mode: 'insensitive' },
-        },
-      },
+      // Search by category IDs
+      ...(matchingCategoryIds.length > 0
+        ? [{ categoryId: { in: matchingCategoryIds } }]
+        : []),
     ];
   }
 
@@ -331,9 +344,6 @@ export const getTransactions = async (
       account: {
         select: { name: true, currency: true, type: true },
       },
-      category: {
-        select: { name: true, icon: true, color: true, parent: true },
-      },
       tags: {
         include: {
           tag: true,
@@ -351,10 +361,20 @@ export const getTransactions = async (
     take: limit,
   });
 
+  // Resolve categories for all transactions in batch
+  const categoryIds = transactions.map((t) => t.categoryId);
+  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
+
+  // Add category info to each transaction
+  const transactionsWithCategories = transactions.map((t) => ({
+    ...t,
+    category: t.categoryId ? categoryMap.get(t.categoryId) || null : null,
+  }));
+
   const totalPages = Math.ceil(total / limit);
 
   return {
-    data: transactions,
+    data: transactionsWithCategories,
     total,
     page,
     limit,
@@ -369,9 +389,6 @@ export const getTransactionById = async (userId: string, transactionId: string) 
     include: {
       account: {
         select: { name: true, currency: true, type: true },
-      },
-      category: {
-        select: { name: true, icon: true, color: true, parent: true },
       },
       tags: {
         include: {
@@ -402,7 +419,10 @@ export const getTransactionById = async (userId: string, transactionId: string) 
     throw new AppError('Transaction not found', 404);
   }
 
-  return transaction;
+  // Resolve category information
+  const category = await resolveCategoryById(transaction.categoryId, userId);
+
+  return { ...transaction, category };
 };
 
 export const updateTransaction = async (
@@ -507,27 +527,40 @@ export const updateTransaction = async (
   }
 
   // Verify category if provided
-  // Categories can come from: CategoryTemplate, UserCategoryOverride, or legacy Category
+  // Categories can come from: CategoryTemplate or UserCategoryOverride
   if (data.categoryId) {
-    // Try to find in new template-based system first
-    const templateCategory = await prisma.categoryTemplate.findUnique({
-      where: { id: data.categoryId },
-    });
+    const isValidCategory = await validateCategoryId(data.categoryId, userId);
 
-    // Check if it's a user override or custom category
-    const userCategory = await prisma.userCategoryOverride.findFirst({
-      where: { id: data.categoryId, userId, isActive: true },
-    });
-
-    // Also check legacy categories for backward compatibility
-    const legacyCategory = await prisma.category.findFirst({
-      where: { id: data.categoryId, userId },
-    });
-
-    if (!templateCategory && !userCategory && !legacyCategory) {
+    if (!isValidCategory) {
       console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
-      console.error(`   Template found: ${!!templateCategory}, Override found: ${!!userCategory}, Legacy found: ${!!legacyCategory}`);
       throw new AppError('Category not found', 404);
+    }
+  }
+
+  // Handle shared expense validation and update
+  if (data.sharedExpenseId !== undefined) {
+    if (data.sharedExpenseId === null) {
+      // User wants to remove shared expense from transaction
+      // No validation needed, just set to null
+    } else if (data.sharedExpenseId) {
+      // User wants to add/update shared expense
+      // Verify the shared expense exists and user has access
+      const sharedExpense = await prisma.sharedExpense.findFirst({
+        where: {
+          id: data.sharedExpenseId,
+          group: {
+            members: {
+              some: {
+                userId,
+              },
+            },
+          },
+        },
+      });
+
+      if (!sharedExpense) {
+        throw new AppError('Shared expense not found or you are not a member', 404);
+      }
     }
   }
 
@@ -574,10 +607,9 @@ export const updateTransaction = async (
       payee: data.payee,
       payer: data.payer,
       toAccountId: data.toAccountId,
-      sharedExpenseId: data.sharedExpenseId,
+      sharedExpenseId: data.sharedExpenseId !== undefined ? data.sharedExpenseId : undefined,
     },
     include: {
-      category: true,
       tags: {
         include: {
           tag: true,
@@ -592,7 +624,10 @@ export const updateTransaction = async (
     },
   });
 
-  return transaction;
+  // Resolve category information
+  const category = await resolveCategoryById(transaction.categoryId, userId);
+
+  return { ...transaction, category };
 };
 
 export const deleteTransaction = async (userId: string, transactionId: string) => {
@@ -639,12 +674,16 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
 export const getTransactionsByCategory = async (userId: string) => {
   const transactions = await prisma.transaction.findMany({
     where: { userId },
-    include: {
-      category: {
-        select: { name: true, icon: true, color: true },
-      },
+    select: {
+      categoryId: true,
+      type: true,
+      amount: true,
     },
   });
+
+  // Resolve all categories in batch
+  const categoryIds = transactions.map((t) => t.categoryId);
+  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
 
   // Group by category
   const byCategory: Record<
@@ -654,15 +693,16 @@ export const getTransactionsByCategory = async (userId: string) => {
 
   transactions.forEach((t) => {
     const categoryKey = t.categoryId || 'uncategorized';
-    const categoryName = t.category?.name || 'Uncategorized';
+    const categoryInfo = t.categoryId ? categoryMap.get(t.categoryId) : null;
+    const categoryName = categoryInfo?.name || 'Uncategorized';
 
     if (!byCategory[categoryKey]) {
       byCategory[categoryKey] = {
         income: 0,
         expense: 0,
         categoryName,
-        icon: t.category?.icon || undefined,
-        color: t.category?.color || undefined,
+        icon: categoryInfo?.icon || undefined,
+        color: categoryInfo?.color || undefined,
       };
     }
 
@@ -688,12 +728,16 @@ export const getTransactionStats = async (userId: string, month: number, year: n
         lte: endDate,
       },
     },
-    include: {
-      category: {
-        select: { name: true, icon: true, color: true },
-      },
+    select: {
+      categoryId: true,
+      type: true,
+      amount: true,
     },
   });
+
+  // Resolve all categories in batch
+  const categoryIds = transactions.map((t) => t.categoryId);
+  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
 
   const stats = {
     totalIncome: 0,
@@ -707,7 +751,8 @@ export const getTransactionStats = async (userId: string, month: number, year: n
 
   transactions.forEach((t) => {
     const categoryKey = t.categoryId || 'uncategorized';
-    const categoryName = t.category?.name || 'Uncategorized';
+    const categoryInfo = t.categoryId ? categoryMap.get(t.categoryId) : null;
+    const categoryName = categoryInfo?.name || 'Uncategorized';
 
     if (t.type === 'INCOME') {
       stats.totalIncome += Number(t.amount);
@@ -718,8 +763,8 @@ export const getTransactionStats = async (userId: string, month: number, year: n
         stats.byCategory[categoryKey] = {
           amount: 0,
           categoryName,
-          icon: t.category?.icon || undefined,
-          color: t.category?.color || undefined,
+          icon: categoryInfo?.icon || undefined,
+          color: categoryInfo?.color || undefined,
         };
       }
       stats.byCategory[categoryKey].amount += Number(t.amount);
@@ -775,14 +820,6 @@ export const getRecentTransactions = async (userId: string, limit: number = 5) =
   const transactions = await prisma.transaction.findMany({
     where: { userId },
     include: {
-      category: {
-        select: {
-          id: true,
-          name: true,
-          icon: true,
-          color: true,
-        },
-      },
       account: {
         select: {
           id: true,
@@ -797,5 +834,15 @@ export const getRecentTransactions = async (userId: string, limit: number = 5) =
     take: limit,
   });
 
-  return transactions;
+  // Resolve categories for all transactions in batch
+  const categoryIds = transactions.map((t) => t.categoryId);
+  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
+
+  // Add category info to each transaction
+  const transactionsWithCategories = transactions.map((t) => ({
+    ...t,
+    category: t.categoryId ? categoryMap.get(t.categoryId) || null : null,
+  }));
+
+  return transactionsWithCategories;
 };

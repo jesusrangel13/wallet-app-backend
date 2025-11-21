@@ -13,8 +13,12 @@ router.get('/summary', dashboardController.getDashboardSummary);
 // Individual endpoints
 router.get('/cashflow', dashboardController.getCashFlow);
 router.get('/expenses-by-category', dashboardController.getExpensesByCategory);
+router.get('/expenses-by-parent-category', dashboardController.getExpensesByParentCategory);
 router.get('/balance-history', dashboardController.getBalanceHistory);
 router.get('/group-balances', dashboardController.getGroupBalances);
 router.get('/account-balances', dashboardController.getAccountBalances);
+router.get('/personal-expenses', dashboardController.getPersonalExpenses);
+router.get('/shared-expenses', dashboardController.getSharedExpensesTotal);
+router.get('/savings', dashboardController.getMonthlySavings);
 
 export default router;

@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { resolveCategoriesBatch } from './categoryResolver.service';
 
 const prisma = new PrismaClient();
 
@@ -73,22 +74,23 @@ export const getExpensesByCategory = async (userId: string) => {
         lte: lastDayOfMonth,
       },
     },
-    include: {
-      category: {
-        select: {
-          name: true,
-          color: true,
-        },
-      },
+    select: {
+      categoryId: true,
+      amount: true,
     },
   });
+
+  // Resolve all categories in batch
+  const categoryIds = expenses.map((e) => e.categoryId);
+  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
 
   // Group by category
   const categoryData: Record<string, number> = {};
   let totalExpenses = 0;
 
   expenses.forEach((expense) => {
-    const categoryName = expense.category?.name || 'Uncategorized';
+    const categoryInfo = expense.categoryId ? categoryMap.get(expense.categoryId) : null;
+    const categoryName = categoryInfo?.name || 'Uncategorized';
     const amount = Number(expense.amount);
 
     if (!categoryData[categoryName]) {
@@ -104,6 +106,72 @@ export const getExpensesByCategory = async (userId: string) => {
     amount,
     percentage: totalExpenses > 0 ? (amount / totalExpenses) * 100 : 0,
   }));
+
+  return result;
+};
+
+export const getExpensesByParentCategory = async (userId: string) => {
+  const now = new Date();
+  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+  const expenses = await prisma.transaction.findMany({
+    where: {
+      userId,
+      type: 'EXPENSE',
+      date: {
+        gte: firstDayOfMonth,
+        lte: lastDayOfMonth,
+      },
+    },
+    select: {
+      categoryId: true,
+      amount: true,
+    },
+  });
+
+  // Resolve all categories in batch with parent info
+  const categoryIds = expenses.map((e) => e.categoryId);
+  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
+
+  // Group by parent category (or category itself if no parent)
+  const categoryData: Record<
+    string,
+    { amount: number; icon: string | null; color: string | null }
+  > = {};
+  let totalExpenses = 0;
+
+  expenses.forEach((expense) => {
+    const categoryInfo = expense.categoryId ? categoryMap.get(expense.categoryId) : null;
+
+    // Use parent category if exists, otherwise use the category itself
+    const parentCategory = categoryInfo?.parent || categoryInfo;
+    const categoryName = parentCategory?.name || 'Uncategorized';
+    const categoryIcon = parentCategory?.icon || null;
+    const categoryColor = parentCategory?.color || null;
+    const amount = Number(expense.amount);
+
+    if (!categoryData[categoryName]) {
+      categoryData[categoryName] = {
+        amount: 0,
+        icon: categoryIcon,
+        color: categoryColor,
+      };
+    }
+    categoryData[categoryName].amount += amount;
+    totalExpenses += amount;
+  });
+
+  // Convert to array with percentages, sorted by amount descending
+  const result = Object.entries(categoryData)
+    .map(([category, data]) => ({
+      category,
+      amount: data.amount,
+      percentage: totalExpenses > 0 ? (data.amount / totalExpenses) * 100 : 0,
+      icon: data.icon,
+      color: data.color,
+    }))
+    .sort((a, b) => b.amount - a.amount);
 
   return result;
 };
@@ -191,7 +259,7 @@ export const getBalanceHistory = async (userId: string, days: number = 30) => {
     // Only add points every 5 days to keep chart clean
     if (i % 5 === 0 || i === days - 1) {
       dailyBalances.push({
-        date: `Day ${i + 1}`,
+        date: dayKey, // Return actual date in YYYY-MM-DD format
         balance: Math.round(currentBalance),
       });
     }
@@ -221,7 +289,7 @@ export const getGroupBalances = async (userId: string) => {
   // Get all groups
   const groups = await prisma.group.findMany({
     where: { id: { in: groupIds } },
-    select: { id: true, name: true },
+    select: { id: true, name: true, coverImageUrl: true },
   });
 
   // Get all members for all groups
@@ -282,6 +350,8 @@ export const getGroupBalances = async (userId: string) => {
     return {
       groupId: group.id,
       groupName: group.name,
+      groupCoverImage: group.coverImageUrl,
+      userBalance: memberBalances[userId] || 0,
       totalOwed,
       members: members
         .filter((member) => member.user.id !== userId)
@@ -371,4 +441,147 @@ export const getDashboardSummary = async (userId: string) => {
     console.error('Error getting dashboard summary:', error);
     throw error;
   }
+};
+
+/**
+ * Get personal expenses for current month
+ * Excludes: shared expenses, transfers, and "Inversiones" category
+ */
+export const getPersonalExpenses = async (userId: string) => {
+  const now = new Date();
+  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+  // Find "Inversiones" category to exclude it
+  const inversionesCategory = await prisma.categoryTemplate.findFirst({
+    where: {
+      name: 'Inversiones',
+      type: 'INCOME',
+      parentTemplateId: null
+    }
+  });
+
+  // Build where clause
+  const where: any = {
+    userId,
+    type: 'EXPENSE',
+    sharedExpenseId: null, // NOT shared
+    date: {
+      gte: firstDayOfMonth,
+      lte: lastDayOfMonth,
+    },
+  };
+
+  // Exclude "Inversiones" category if it exists
+  if (inversionesCategory) {
+    where.categoryId = { not: inversionesCategory.id };
+  }
+
+  const result = await prisma.transaction.aggregate({
+    where,
+    _sum: {
+      amount: true,
+    },
+  });
+
+  return {
+    total: Number(result._sum.amount || 0),
+    month: now.toLocaleString('default', { month: 'long', year: 'numeric' }),
+  };
+};
+
+/**
+ * Get shared expenses total for current month
+ * Calculates user's share from ExpenseParticipant.amountOwed
+ */
+export const getSharedExpensesTotal = async (userId: string) => {
+  const now = new Date();
+  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+  // Get all shared expense transactions for the user
+  const sharedExpenses = await prisma.transaction.findMany({
+    where: {
+      userId,
+      type: 'EXPENSE',
+      sharedExpenseId: { not: null },
+      date: {
+        gte: firstDayOfMonth,
+        lte: lastDayOfMonth,
+      },
+    },
+    include: {
+      sharedExpense: {
+        include: {
+          participants: {
+            where: { userId }, // Only get current user's participation
+          },
+        },
+      },
+    },
+  });
+
+  // Sum user's share from ExpenseParticipant.amountOwed
+  const total = sharedExpenses.reduce((sum, tx) => {
+    const userParticipation = tx.sharedExpense?.participants[0];
+    return sum + Number(userParticipation?.amountOwed || 0);
+  }, 0);
+
+  return {
+    total,
+    count: sharedExpenses.length,
+    month: now.toLocaleString('default', { month: 'long', year: 'numeric' }),
+  };
+};
+
+/**
+ * Get monthly savings
+ * Calculation: Total Income - (Personal Expenses + Shared Expenses portion)
+ */
+export const getMonthlySavings = async (userId: string) => {
+  const now = new Date();
+  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+  // Get total income
+  const incomeResult = await prisma.transaction.aggregate({
+    where: {
+      userId,
+      type: 'INCOME',
+      date: {
+        gte: firstDayOfMonth,
+        lte: lastDayOfMonth,
+      },
+    },
+    _sum: {
+      amount: true,
+    },
+  });
+
+  const totalIncome = Number(incomeResult._sum.amount || 0);
+
+  // Get personal expenses (excluding shared and transfers)
+  const personalExpensesData = await getPersonalExpenses(userId);
+  const personalExpenses = personalExpensesData.total;
+
+  // Get shared expenses (user's share)
+  const sharedExpensesData = await getSharedExpensesTotal(userId);
+  const sharedExpenses = sharedExpensesData.total;
+
+  // Calculate savings
+  const totalExpenses = personalExpenses + sharedExpenses;
+  const savings = totalIncome - totalExpenses;
+  const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
+
+  return {
+    savings,
+    savingsRate,
+    income: totalIncome,
+    expenses: totalExpenses,
+    breakdown: {
+      personal: personalExpenses,
+      shared: sharedExpenses,
+    },
+    month: now.toLocaleString('default', { month: 'long', year: 'numeric' }),
+  };
 };

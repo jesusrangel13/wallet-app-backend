@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { resolveCategoriesBatch } from './categoryResolver.service';
+import { createTransaction } from './transaction.service';
 
 const prisma = new PrismaClient();
 
@@ -10,6 +12,7 @@ interface ImportTransactionData {
   amount: number;
   description: string;
   categoryId?: string;
+  payee?: string; // Recipient/merchant name
   tags?: string[];
   notes?: string;
   receiptUrl?: string;
@@ -102,10 +105,12 @@ export const importTransactions = async (
         }
       }
 
-      // Create the transaction
+      // Create the transaction using the transaction service
+      // This ensures balance updates are properly handled
       let sharedExpenseId: string | undefined = undefined;
+      let transaction;
 
-      // If this is a shared expense, create it first
+      // If this is a shared expense, create it directly with proper date handling
       if (txData.sharedGroup && txData.paidBy && txData.splitType && txData.participants) {
         // Find the group by name
         const group = await prisma.group.findFirst({
@@ -132,18 +137,6 @@ export const importTransactions = async (
           throw new Error(`User with email "${txData.paidBy}" not found`);
         }
 
-        // Verify paidByUser is a member of the group
-        const isPaidByMember = await prisma.groupMember.findFirst({
-          where: {
-            groupId: group.id,
-            userId: paidByUser.id,
-          },
-        });
-
-        if (!isPaidByMember) {
-          throw new Error(`User "${txData.paidBy}" is not a member of group "${txData.sharedGroup}"`);
-        }
-
         // Parse participants: "email1:value1,email2:value2"
         const participantEntries = txData.participants.split(',').map(p => {
           const [email, valueStr] = p.trim().split(':');
@@ -155,12 +148,10 @@ export const importTransactions = async (
 
         // Validate split type format and values
         if (txData.splitType === 'EQUAL') {
-          // EQUAL doesn't require values
           if (participantEntries.some(p => p.value)) {
             throw new Error('EQUAL split type should not have values in participants (divide equally)');
           }
         } else if (txData.splitType === 'PERCENTAGE') {
-          // PERCENTAGE: values should be numbers that sum to 100
           const percentages = participantEntries.map(p => {
             const num = parseFloat(p.value);
             if (isNaN(num) || num <= 0) {
@@ -173,7 +164,6 @@ export const importTransactions = async (
             throw new Error(`Percentages must sum to 100. Current sum: ${totalPercentage.toFixed(2)}%`);
           }
         } else if (txData.splitType === 'EXACT') {
-          // EXACT: values should be numbers that sum to the transaction amount
           const amounts = participantEntries.map(p => {
             const num = parseFloat(p.value);
             if (isNaN(num) || num <= 0) {
@@ -186,7 +176,6 @@ export const importTransactions = async (
             throw new Error(`Amounts must sum to ${txData.amount}. Current sum: ${totalAmount.toFixed(2)}`);
           }
         } else if (txData.splitType === 'SHARES') {
-          // SHARES: values should be positive integers
           const shares = participantEntries.map(p => {
             const num = parseInt(p.value, 10);
             if (isNaN(num) || num <= 0 || !Number.isInteger(parseFloat(p.value))) {
@@ -200,7 +189,7 @@ export const importTransactions = async (
           }
         }
 
-        // Convert to amounts for storage
+        // Calculate amounts for storage
         const amounts = participantEntries.map((p, index) => {
           if (txData.splitType === 'EQUAL') {
             return txData.amount / participantEntries.length;
@@ -246,7 +235,7 @@ export const importTransactions = async (
           })
         );
 
-        // Create the SharedExpense first
+        // Create the SharedExpense with the original date from import
         const sharedExpense = await prisma.sharedExpense.create({
           data: {
             groupId: group.id,
@@ -267,60 +256,21 @@ export const importTransactions = async (
         });
 
         sharedExpenseId = sharedExpense.id;
-
-        // Now create the transaction with the sharedExpenseId
-        await prisma.transaction.create({
-          data: {
-            userId,
-            accountId,
-            type: txData.type,
-            amount: txData.amount,
-            description: txData.description,
-            categoryId: txData.categoryId,
-            date: new Date(txData.date),
-            receiptUrl: txData.receiptUrl,
-            sharedExpenseId: sharedExpense.id,
-            tags: {
-              create: tagIds.map(tagId => ({
-                tagId,
-              })),
-            },
-          },
-        });
-
-      } else {
-        // Regular transaction (not shared)
-        await prisma.transaction.create({
-          data: {
-            userId,
-            accountId,
-            type: txData.type,
-            amount: txData.amount,
-            description: txData.description,
-            categoryId: txData.categoryId,
-            date: new Date(txData.date),
-            receiptUrl: txData.receiptUrl,
-            tags: {
-              create: tagIds.map(tagId => ({
-                tagId,
-              })),
-            },
-          },
-        });
       }
 
-      // Get the transaction (either from shared expense creation or regular creation)
-      const transaction = await prisma.transaction.findFirst({
-        where: {
-          userId,
-          accountId,
-          amount: txData.amount,
-          description: txData.description,
-          date: new Date(txData.date),
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
+      // Create the transaction using the transaction service
+      // This ensures proper balance updates for all account types including credit cards
+      transaction = await createTransaction(userId, {
+        accountId,
+        type: txData.type,
+        amount: txData.amount,
+        description: txData.description,
+        categoryId: txData.categoryId,
+        payee: txData.payee,
+        date: txData.date,
+        receiptUrl: txData.receiptUrl,
+        sharedExpenseId,
+        tags: tagIds.length > 0 ? tagIds : undefined,
       });
 
       if (!transaction) {
@@ -456,13 +406,7 @@ export const getImportHistoryById = async (userId: string, importId: string) => 
               amount: true,
               description: true,
               date: true,
-              category: {
-                select: {
-                  id: true,
-                  name: true,
-                  color: true,
-                },
-              },
+              categoryId: true,
             },
           },
         },
@@ -477,5 +421,28 @@ export const getImportHistoryById = async (userId: string, importId: string) => 
     throw new AppError('Import history not found', 404);
   }
 
-  return importHistory;
+  // Resolve categoryIds to CategoryInfo for display
+  const categoryIds = importHistory.importedTransactions
+    .map((tx) => tx.transaction?.categoryId)
+    .filter((id): id is string => id !== null && id !== undefined);
+
+  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
+
+  // Enhance transactions with resolved category info
+  const enhancedTransactions = importHistory.importedTransactions.map((tx) => ({
+    ...tx,
+    transaction: tx.transaction
+      ? {
+          ...tx.transaction,
+          category: tx.transaction.categoryId
+            ? categoryMap.get(tx.transaction.categoryId) || null
+            : null,
+        }
+      : null,
+  }));
+
+  return {
+    ...importHistory,
+    importedTransactions: enhancedTransactions,
+  };
 };

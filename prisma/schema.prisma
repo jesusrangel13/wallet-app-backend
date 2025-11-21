@@ -27,11 +27,14 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  // Default account for shared expense settlements
+  defaultSharedExpenseAccountId String? @map("default_shared_expense_account_id")
+
   // Relations
   accounts              Account[]
+  defaultSharedExpenseAccount Account? @relation("DefaultSharedExpenseAccount", fields: [defaultSharedExpenseAccountId], references: [id], onDelete: SetNull)
   transactions          Transaction[]
   budgets               Budget[]
-  categories            Category[]
   categoryOverrides     UserCategoryOverride[] @relation("UserCategoryOverrides")
   tags                  Tag[]
   groupMemberships      GroupMember[]
@@ -60,6 +63,8 @@ model Account {
   balance     Decimal  @db.Decimal(15, 2)
   currency    String   @default("CLP") // CLP, USD, EUR
   isDefault   Boolean  @default(false) @map("is_default")
+  isArchived  Boolean  @default(false) @map("is_archived") // Soft delete for accounts
+  includeInTotalBalance Boolean @default(true) @map("include_in_total_balance") // Whether to include this account in total balance calculation
 
   // Credit card specific fields
   creditLimit Decimal? @db.Decimal(15, 2) @map("credit_limit") // Only for CREDIT type
@@ -73,8 +78,10 @@ model Account {
   transactions          Transaction[]
   transfersDestination  Transaction[] @relation("TransferDestination")
   importHistory         ImportHistory[]
+  usersWithDefaultSharedExpenseAccount User[] @relation("DefaultSharedExpenseAccount")
 
   @@index([userId])
+  @@index([userId, isArchived])
   @@map("accounts")
 }
 
@@ -92,7 +99,7 @@ model Transaction {
   accountId       String          @map("account_id")
   type            TransactionType
   amount          Decimal         @db.Decimal(15, 2)
-  categoryId      String?         @map("category_id") // Reference to Category
+  categoryId      String?         @map("category_id") // Reference to UserCategoryOverride or CategoryTemplate ID
   description     String?
   date            DateTime        @default(now())
   receiptUrl      String?         @map("receipt_url")
@@ -113,7 +120,6 @@ model Transaction {
   // Relations
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   account       Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   toAccount     Account?       @relation("TransferDestination", fields: [toAccountId], references: [id])
   sharedExpense SharedExpense? @relation(fields: [sharedExpenseId], references: [id], onDelete: SetNull)
   tags          TransactionTag[]
@@ -123,6 +129,7 @@ model Transaction {
   @@index([accountId])
   @@index([categoryId])
   @@index([date])
+  @@index([type])
   @@index([toAccountId])
   @@index([sharedExpenseId])
   @@map("transactions")
@@ -190,32 +197,6 @@ model UserCategoryOverride {
   @@index([type])
   @@unique([userId, templateId]) // One override per template per user
   @@map("user_category_overrides")
-}
-
-// Legacy categories table (keep temporarily for migration)
-model Category {
-  id          String   @id @default(uuid())
-  userId      String   @map("user_id")
-  name        String
-  icon        String?  // Icon name or emoji
-  color       String?  // Color hex code
-  type        TransactionType // Category for EXPENSE, INCOME, or both
-  parentId    String?  @map("parent_id") // For subcategories
-  isDefault   Boolean  @default(false) @map("is_default") // System default categories
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  parent         Category?       @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  subcategories  Category[]      @relation("CategoryHierarchy")
-  transactions   Transaction[]
-  sharedExpenses SharedExpense[]
-
-  @@index([userId])
-  @@index([parentId])
-  @@index([type])
-  @@map("categories")
 }
 
 model Tag {
@@ -341,7 +322,7 @@ model SharedExpense {
   paidByUserId String        @map("paid_by_user_id")
   amount       Decimal       @db.Decimal(15, 2)
   description  String
-  categoryId   String?       @map("category_id")
+  categoryId   String?       @map("category_id") // Reference to UserCategoryOverride or CategoryTemplate ID
   date         DateTime      @default(now())
   receiptUrl   String?       @map("receipt_url")
   splitType    SplitType     @default(EQUAL) @map("split_type")
@@ -351,7 +332,6 @@ model SharedExpense {
   // Relations
   group        Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
   paidBy       User                 @relation("PaidBy", fields: [paidByUserId], references: [id])
-  category     Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   participants ExpenseParticipant[]
   transactions Transaction[]
 

@@ -12,5 +12,6 @@ router.put('/profile', userController.updateProfile);
 router.delete('/account', userController.deleteAccount);
 router.get('/stats', userController.getUserStats);
 router.get('/my-balances', userController.getMyBalances);
+router.patch('/me/default-shared-expense-account', userController.updateDefaultSharedExpenseAccount);
 
 export default router;

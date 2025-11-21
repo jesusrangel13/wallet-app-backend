@@ -182,7 +182,11 @@ export const getAccountBalance = async (userId: string, accountId: string) => {
 
 export const getTotalBalance = async (userId: string) => {
   const accounts = await prisma.account.findMany({
-    where: { userId },
+    where: {
+      userId,
+      includeInTotalBalance: true,
+      isArchived: false,
+    },
     select: { balance: true, currency: true },
   });
 

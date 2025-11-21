@@ -92,3 +92,27 @@ export const getMyBalances = async (
     next(error);
   }
 };
+
+export const updateDefaultSharedExpenseAccount = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { accountId } = req.body;
+
+    const user = await userService.updateDefaultSharedExpenseAccount(
+      userId,
+      accountId
+    );
+
+    res.status(200).json({
+      success: true,
+      data: user,
+      message: 'Default shared expense account updated successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};

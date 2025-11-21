@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import * as sharedExpenseService from '../services/sharedExpense.service';
-import { createSharedExpenseSchema, createPaymentSchema } from '../utils/validation';
+import { createSharedExpenseSchema, updateSharedExpenseSchema, createPaymentSchema } from '../utils/validation';
 
 export const createSharedExpense = async (
   req: Request,
@@ -19,6 +19,31 @@ export const createSharedExpense = async (
       success: true,
       data: expense,
       message: 'Shared expense created successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateSharedExpense = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { id } = req.params;
+    const validatedData = updateSharedExpenseSchema.parse(req.body);
+    const expense = await sharedExpenseService.updateSharedExpense(
+      userId,
+      id,
+      validatedData
+    );
+
+    res.status(200).json({
+      success: true,
+      data: expense,
+      message: 'Shared expense updated successfully',
     });
   } catch (error) {
     next(error);
@@ -156,15 +181,18 @@ export const markParticipantAsPaid = async (
   try {
     const userId = (req as any).user.userId;
     const { id: expenseId, participantUserId } = req.params;
-    const participant = await sharedExpenseService.markParticipantAsPaid(
+    const { accountId } = req.body;
+
+    const result = await sharedExpenseService.markParticipantAsPaid(
       userId,
       expenseId,
-      participantUserId
+      participantUserId,
+      accountId
     );
 
     res.status(200).json({
       success: true,
-      data: participant,
+      data: result,
       message: 'Participant marked as paid successfully',
     });
   } catch (error) {

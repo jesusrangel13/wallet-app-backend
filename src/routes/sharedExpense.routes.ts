@@ -10,6 +10,7 @@ router.use(authenticate);
 router.post('/', sharedExpenseController.createSharedExpense);
 router.get('/', sharedExpenseController.getSharedExpenses);
 router.get('/:id', sharedExpenseController.getSharedExpenseById);
+router.put('/:id', sharedExpenseController.updateSharedExpense);
 router.delete('/:id', sharedExpenseController.deleteSharedExpense);
 router.post('/payments', sharedExpenseController.settlePayment);
 router.get('/payments/history', sharedExpenseController.getPaymentHistory);

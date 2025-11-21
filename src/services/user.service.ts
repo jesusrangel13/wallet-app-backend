@@ -27,6 +27,16 @@ export const getProfile = async (userId: string) => {
       currency: true,
       country: true,
       isVerified: true,
+      defaultSharedExpenseAccountId: true,
+      defaultSharedExpenseAccount: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          balance: true,
+          currency: true,
+        },
+      },
       createdAt: true,
       updatedAt: true,
     },
@@ -79,4 +89,55 @@ export const getUserStats = async (userId: string) => {
     transactions: transactionCount,
     groups: groupCount,
   };
+};
+
+export const updateDefaultSharedExpenseAccount = async (
+  userId: string,
+  accountId: string | null
+) => {
+  // If accountId is provided, verify it belongs to the user
+  if (accountId) {
+    const account = await prisma.account.findFirst({
+      where: {
+        id: accountId,
+        userId,
+        isArchived: false,
+      },
+    });
+
+    if (!account) {
+      throw new AppError(
+        'Account not found or does not belong to user',
+        404
+      );
+    }
+  }
+
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { defaultSharedExpenseAccountId: accountId },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      avatarUrl: true,
+      currency: true,
+      country: true,
+      isVerified: true,
+      defaultSharedExpenseAccountId: true,
+      defaultSharedExpenseAccount: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          balance: true,
+          currency: true,
+        },
+      },
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return user;
 };

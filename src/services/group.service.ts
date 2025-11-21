@@ -8,6 +8,14 @@ interface CreateGroupData {
   name: string;
   description?: string;
   coverImageUrl?: string;
+  memberEmails?: string[];
+  defaultSplitType?: 'EQUAL' | 'PERCENTAGE' | 'SHARES' | 'EXACT';
+  memberSplitSettings?: Array<{
+    email: string;
+    percentage?: number;
+    shares?: number;
+    exactAmount?: number;
+  }>;
 }
 
 interface UpdateGroupData {
@@ -17,12 +25,14 @@ interface UpdateGroupData {
 }
 
 export const createGroup = async (userId: string, data: CreateGroupData) => {
+  // Create the group with the creator as the first member
   const group = await prisma.group.create({
     data: {
       name: data.name,
       description: data.description,
       coverImageUrl: data.coverImageUrl,
       createdBy: userId,
+      defaultSplitType: data.defaultSplitType || 'EQUAL',
       members: {
         create: {
           userId,
@@ -42,10 +52,144 @@ export const createGroup = async (userId: string, data: CreateGroupData) => {
           },
         },
       },
+      defaultSplitSettings: true,
+      _count: {
+        select: {
+          sharedExpenses: true,
+        },
+      },
     },
   });
 
-  return group;
+  // Add additional members if provided
+  const addedMembers: Array<{ email: string; success: boolean; error?: string }> = [];
+
+  if (data.memberEmails && data.memberEmails.length > 0) {
+    for (const email of data.memberEmails) {
+      try {
+        // Find user by email
+        const memberUser = await prisma.user.findUnique({
+          where: { email },
+        });
+
+        if (!memberUser) {
+          addedMembers.push({ email, success: false, error: 'User not found' });
+          continue;
+        }
+
+        // Check if user is already a member (shouldn't be, but just in case)
+        if (memberUser.id === userId) {
+          addedMembers.push({ email, success: false, error: 'Creator is already a member' });
+          continue;
+        }
+
+        // Add member to group
+        await prisma.groupMember.create({
+          data: {
+            groupId: group.id,
+            userId: memberUser.id,
+          },
+        });
+
+        // Get group name and creator name for notification
+        const creator = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { name: true },
+        });
+
+        // Notify the new member
+        await notificationService.createNotification({
+          userId: memberUser.id,
+          type: 'GROUP_MEMBER_ADDED',
+          title: 'Agregado a grupo',
+          message: `${creator?.name} te agregó al grupo "${group.name}"`,
+          data: {
+            groupId: group.id,
+            addedBy: userId,
+          },
+        });
+
+        addedMembers.push({ email, success: true });
+      } catch (error: any) {
+        addedMembers.push({ email, success: false, error: error.message });
+      }
+    }
+  }
+
+  // Create split settings if provided and split type is not EQUAL
+  if (
+    data.memberSplitSettings &&
+    data.memberSplitSettings.length > 0 &&
+    data.defaultSplitType &&
+    data.defaultSplitType !== 'EQUAL'
+  ) {
+    // Build a map of email -> userId for all group members
+    const allMembers = await prisma.groupMember.findMany({
+      where: { groupId: group.id },
+      include: {
+        user: {
+          select: { id: true, email: true },
+        },
+      },
+    });
+
+    const emailToUserId = new Map<string, string>();
+    allMembers.forEach((member) => {
+      emailToUserId.set(member.user.email.toLowerCase(), member.userId);
+    });
+
+    // Create split defaults for each member with settings
+    const splitDefaults = data.memberSplitSettings
+      .map((setting) => {
+        const memberUserId = emailToUserId.get(setting.email.toLowerCase());
+        if (!memberUserId) return null;
+
+        return {
+          groupId: group.id,
+          userId: memberUserId,
+          percentage: setting.percentage,
+          shares: setting.shares,
+          exactAmount: setting.exactAmount,
+        };
+      })
+      .filter((s) => s !== null);
+
+    if (splitDefaults.length > 0) {
+      await prisma.groupMemberSplitDefault.createMany({
+        data: splitDefaults,
+      });
+    }
+  }
+
+  // Fetch the updated group with all members
+  const updatedGroup = await prisma.group.findUnique({
+    where: { id: group.id },
+    include: {
+      members: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              avatarUrl: true,
+            },
+          },
+        },
+      },
+      defaultSplitSettings: true,
+      _count: {
+        select: {
+          sharedExpenses: true,
+        },
+      },
+    },
+  });
+
+  return {
+    ...updatedGroup,
+    memberAddResults: addedMembers.length > 0 ? addedMembers : undefined,
+  };
 };
 
 export const getGroups = async (userId: string) => {

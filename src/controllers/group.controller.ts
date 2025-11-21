@@ -206,7 +206,7 @@ export const settleAllBalance = async (
   try {
     const userId = (req as any).user.userId;
     const { id: groupId } = req.params;
-    const { otherUserId } = req.body;
+    const { otherUserId, accountId } = req.body;
 
     if (!otherUserId) {
       return res.status(400).json({
@@ -218,7 +218,8 @@ export const settleAllBalance = async (
     const result = await sharedExpenseService.settleAllBalance(
       userId,
       groupId,
-      otherUserId
+      otherUserId,
+      accountId
     );
 
     res.status(200).json({

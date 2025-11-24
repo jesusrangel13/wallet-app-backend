@@ -643,6 +643,80 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
     throw new AppError('Transaction not found', 404);
   }
 
+  // Check if this is a shared expense transaction
+  if (transaction.sharedExpenseId) {
+    // Load the shared expense with all its linked transactions
+    const sharedExpense = await prisma.sharedExpense.findUnique({
+      where: { id: transaction.sharedExpenseId },
+      include: {
+        transactions: {
+          include: {
+            account: true,
+            toAccount: true,
+          },
+        },
+      },
+    });
+
+    if (!sharedExpense) {
+      throw new AppError('Shared expense not found', 404);
+    }
+
+    // VALIDATION: Only the person who paid can delete the shared expense
+    if (sharedExpense.paidByUserId !== userId) {
+      throw new AppError(
+        'Solo la persona que pagó puede eliminar este gasto compartido',
+        403
+      );
+    }
+
+    // Use database transaction for atomicity
+    return await prisma.$transaction(async (tx) => {
+      // 1. Revert balances for ALL linked transactions
+      for (const trans of sharedExpense.transactions) {
+        await updateAccountBalance(
+          trans.accountId,
+          trans.account.type,
+          trans.type,
+          Number(trans.amount),
+          'subtract'
+        );
+
+        // If it's a transfer, revert destination account
+        if (trans.type === 'TRANSFER' && trans.toAccountId && trans.toAccount) {
+          await updateAccountBalance(
+            trans.toAccountId,
+            trans.toAccount.type,
+            'INCOME',
+            Number(trans.amount),
+            'subtract'
+          );
+        }
+      }
+
+      // 2. Delete the SharedExpense (this will delete ExpenseParticipant via cascade
+      //    and set sharedExpenseId to NULL on transactions)
+      await tx.sharedExpense.delete({
+        where: { id: sharedExpense.id },
+      });
+
+      // 3. Delete ALL linked transactions
+      await tx.transaction.deleteMany({
+        where: {
+          id: {
+            in: sharedExpense.transactions.map(t => t.id),
+          },
+        },
+      });
+
+      return {
+        message: 'Gasto compartido y todas las transacciones vinculadas eliminadas exitosamente',
+        deletedTransactions: sharedExpense.transactions.length,
+      };
+    });
+  }
+
+  // If NOT a shared expense, continue with normal deletion logic
   // Revert balance change
   await updateAccountBalance(
     transaction.accountId,
@@ -800,19 +874,33 @@ export const bulkDeleteTransactions = async (
     throw new AppError('Some transactions not found or do not belong to you', 404);
   }
 
-  // Delete all transactions
-  const result = await prisma.transaction.deleteMany({
-    where: {
-      id: {
-        in: transactionIds,
-      },
-      userId,
-    },
-  });
+  // Delete each transaction individually to properly handle balances and shared expenses
+  let deletedCount = 0;
+  const results = [];
+  const errors = [];
+
+  for (const transactionId of transactionIds) {
+    try {
+      const result = await deleteTransaction(userId, transactionId);
+      deletedCount++;
+      results.push({ transactionId, success: true, ...result });
+    } catch (error: any) {
+      // If deletion fails (e.g., no permission to delete shared expense), log and continue
+      console.error(`Error deleting transaction ${transactionId}:`, error.message);
+      errors.push({
+        transactionId,
+        success: false,
+        error: error.message
+      });
+    }
+  }
 
   return {
-    deletedCount: result.count,
-    message: `${result.count} transaction(s) deleted successfully`,
+    deletedCount,
+    totalRequested: transactionIds.length,
+    results,
+    errors,
+    message: `${deletedCount} de ${transactionIds.length} transacciones eliminadas exitosamente`,
   };
 };
 

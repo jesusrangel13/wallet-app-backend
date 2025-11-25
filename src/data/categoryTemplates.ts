@@ -9,10 +9,10 @@ interface CategoryTemplateData {
   orderIndex: number;
 }
 
-// 82 default categories organized hierarchically
+// 84 default categories organized hierarchically
 export const DEFAULT_CATEGORY_TEMPLATES: CategoryTemplateData[] = [
   // ========================================
-  // EXPENSE CATEGORIES (10 main + 51 sub = 61)
+  // EXPENSE CATEGORIES (10 main + 52 sub = 62)
   // ========================================
 
   // 1. Comida y Bebidas
@@ -95,9 +95,10 @@ export const DEFAULT_CATEGORY_TEMPLATES: CategoryTemplateData[] = [
   { name: 'Impuestos', icon: '📋', color: '#DCD5E8', type: 'EXPENSE', parentName: 'Otros Gastos', orderIndex: 4 },
   { name: 'Miscellaneous', icon: '🔮', color: '#DCD5E8', type: 'EXPENSE', parentName: 'Otros Gastos', orderIndex: 5 },
   { name: 'Pago de deuda', icon: '💰', color: '#DCD5E8', type: 'EXPENSE', parentName: 'Otros Gastos', orderIndex: 6 },
+  { name: 'Préstamo otorgado', icon: '🤝', color: '#FF9800', type: 'EXPENSE', parentName: 'Otros Gastos', orderIndex: 7 },
 
   // ========================================
-  // INCOME CATEGORIES (4 main + 17 sub = 21)
+  // INCOME CATEGORIES (4 main + 18 sub = 22)
   // ========================================
 
   // 1. Salario
@@ -128,4 +129,5 @@ export const DEFAULT_CATEGORY_TEMPLATES: CategoryTemplateData[] = [
   { name: 'Apuestas', icon: '🎰', color: '#FFD93D', type: 'INCOME', parentName: 'Otros Ingresos', orderIndex: 3 },
   { name: 'Otros', icon: '⭐', color: '#FFD93D', type: 'INCOME', parentName: 'Otros Ingresos', orderIndex: 4 },
   { name: 'Cobro de deuda', icon: '💸', color: '#FFD93D', type: 'INCOME', parentName: 'Otros Ingresos', orderIndex: 5 },
+  { name: 'Cobro de préstamo', icon: '💚', color: '#4CAF50', type: 'INCOME', parentName: 'Otros Ingresos', orderIndex: 6 },
 ];

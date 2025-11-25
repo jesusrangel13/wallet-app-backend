@@ -47,6 +47,8 @@ model User {
   importHistory         ImportHistory[]
   notifications         Notification[]
   dashboardPreference   UserDashboardPreference?
+  loans                 Loan[]      @relation("UserLoans")
+  borrowedLoans         Loan[]      @relation("BorrowedLoans")
 
   @@map("users")
 }
@@ -114,6 +116,9 @@ model Transaction {
   // Shared expense relation
   sharedExpenseId String?         @map("shared_expense_id")
 
+  // Loan relation
+  loanId          String?         @unique @map("loan_id")
+
   createdAt       DateTime        @default(now()) @map("created_at")
   updatedAt       DateTime        @updatedAt @map("updated_at")
 
@@ -124,6 +129,8 @@ model Transaction {
   sharedExpense SharedExpense? @relation(fields: [sharedExpenseId], references: [id], onDelete: SetNull)
   tags          TransactionTag[]
   importedTransactions ImportedTransaction[]
+  loan          Loan?          @relation("LoanTransaction", fields: [loanId], references: [id], onDelete: SetNull)
+  loanPayment   LoanPayment?
 
   @@index([userId])
   @@index([accountId])
@@ -132,6 +139,7 @@ model Transaction {
   @@index([type])
   @@index([toAccountId])
   @@index([sharedExpenseId])
+  @@index([loanId])
   @@map("transactions")
 }
 
@@ -389,6 +397,60 @@ model Payment {
   @@index([fromUserId])
   @@index([toUserId])
   @@map("payments")
+}
+
+// ========================================
+// LOANS
+// ========================================
+
+model Loan {
+  id              String      @id @default(uuid())
+  userId          String      @map("user_id") // Who is lending (the user)
+  borrowerName    String      @map("borrower_name") // Name of the borrower
+  borrowerUserId  String?     @map("borrower_user_id") // If borrower is a registered user (optional)
+  originalAmount  Decimal     @db.Decimal(15, 2) @map("original_amount")
+  paidAmount      Decimal     @default(0) @db.Decimal(15, 2) @map("paid_amount")
+  currency        String      @default("CLP")
+  loanDate        DateTime    @default(now()) @map("loan_date")
+  notes           String?
+  status          LoanStatus  @default(ACTIVE)
+
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  user            User        @relation("UserLoans", fields: [userId], references: [id], onDelete: Cascade)
+  borrowerUser    User?       @relation("BorrowedLoans", fields: [borrowerUserId], references: [id], onDelete: SetNull)
+  loanTransaction Transaction? @relation("LoanTransaction")
+  payments        LoanPayment[]
+
+  @@index([userId, status])
+  @@index([borrowerUserId])
+  @@map("loans")
+}
+
+model LoanPayment {
+  id              String      @id @default(uuid())
+  loanId          String      @map("loan_id")
+  amount          Decimal     @db.Decimal(15, 2)
+  paymentDate     DateTime    @default(now()) @map("payment_date")
+  transactionId   String?     @unique @map("transaction_id")
+  notes           String?
+
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  // Relations
+  loan            Loan        @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  transaction     Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([loanId])
+  @@map("loan_payments")
+}
+
+enum LoanStatus {
+  ACTIVE      // Has pending balance
+  PAID        // Completely paid
+  CANCELLED   // Cancelled/forgiven
 }
 
 // ========================================

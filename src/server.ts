@@ -19,6 +19,7 @@ import importRoutes from './routes/import.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import notificationRoutes from './routes/notification.routes';
 import dashboardPreferenceRoutes from './routes/dashboardPreference.routes';
+import loanRoutes from './routes/loan.routes';
 import { CategoryTemplateService } from './services/categoryTemplate.service';
 
 // Load environment variables
@@ -77,6 +78,7 @@ app.use('/api/tags', tagRoutes);
 app.use('/api/budgets', budgetRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/shared-expenses', sharedExpenseRoutes);
+app.use('/api/loans', loanRoutes);
 app.use('/api/import', importRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/notifications', notificationRoutes);

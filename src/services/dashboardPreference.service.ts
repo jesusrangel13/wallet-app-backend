@@ -73,8 +73,8 @@ class DashboardPreferenceService {
       { id: 'widget-8', type: 'expenses-by-category' },
       { id: 'widget-9', type: 'balance-trend' },
       { id: 'widget-10', type: 'group-balances' },
-      { id: 'widget-11', type: 'account-balances' },
-      { id: 'widget-12', type: 'recent-transactions' },
+      // NOTE: account-balances is now a fixed widget, not part of the grid
+      { id: 'widget-11', type: 'recent-transactions' },
     ]
 
     const defaultLayout: GridLayoutItem[] = [
@@ -92,9 +92,8 @@ class DashboardPreferenceService {
       { i: 'widget-8', x: 2, y: 6, w: 2, h: 2, minW: 2, minH: 1 },
       { i: 'widget-9', x: 0, y: 8, w: 2, h: 2, minW: 2, minH: 1 },
       { i: 'widget-10', x: 2, y: 8, w: 2, h: 2, minW: 2, minH: 1 },
-      { i: 'widget-11', x: 0, y: 10, w: 2, h: 2, minW: 2, minH: 1 },
       // Recent transactions full width
-      { i: 'widget-12', x: 0, y: 12, w: 4, h: 2, minW: 2, minH: 1 },
+      { i: 'widget-11', x: 0, y: 10, w: 4, h: 2, minW: 2, minH: 1 },
     ]
 
     const preference = (await (prisma.userDashboardPreference as any).create({

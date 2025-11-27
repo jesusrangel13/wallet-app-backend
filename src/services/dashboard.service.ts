@@ -347,12 +347,18 @@ export const getGroupBalances = async (userId: string) => {
       .filter(([memberId]) => memberId !== userId)
       .reduce((sum, [, balance]) => sum + (balance < 0 ? Math.abs(balance) : 0), 0);
 
+    // Calculate total shared expenses for the group
+    const totalSharedExpenses = sharedExpenses.reduce((sum, expense) => {
+      return sum + Number(expense.amount);
+    }, 0);
+
     return {
       groupId: group.id,
       groupName: group.name,
       groupCoverImage: group.coverImageUrl,
       userBalance: memberBalances[userId] || 0,
       totalOwed,
+      totalSharedExpenses,
       members: members
         .filter((member) => member.user.id !== userId)
         .map((member) => ({

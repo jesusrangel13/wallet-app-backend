@@ -91,21 +91,32 @@ export const createLoan = async (userId: string, data: CreateLoanData) => {
       },
     });
 
-    // 2. Create EXPENSE transaction (money leaving account)
-    const transaction = await transactionService.createTransaction(userId, {
-      accountId: data.accountId,
-      type: 'EXPENSE',
-      amount: data.amount,
-      categoryId,
-      description: `Préstamo a ${data.borrowerName}`,
-      date: data.loanDate,
-      payee: data.borrowerName,
+    // 2. Create EXPENSE transaction (money leaving account) - inline to avoid nested transaction
+    const transaction = await tx.transaction.create({
+      data: {
+        userId,
+        accountId: data.accountId,
+        type: 'EXPENSE',
+        amount: data.amount,
+        categoryId,
+        description: `Préstamo a ${data.borrowerName}`,
+        date: data.loanDate ? new Date(data.loanDate) : new Date(),
+        payee: data.borrowerName,
+        payer: user.name,
+        loanId: loan.id,
+      },
+      include: {
+        account: {
+          select: { name: true, currency: true, type: true },
+        },
+      },
     });
 
-    // 3. Link transaction to loan
-    await tx.transaction.update({
-      where: { id: transaction.id },
-      data: { loanId: loan.id },
+    // 3. Update account balance
+    const balanceChange = account.type === 'CREDIT' ? data.amount : -data.amount;
+    await tx.account.update({
+      where: { id: account.id },
+      data: { balance: { increment: balanceChange } },
     });
 
     // Return loan with transaction
@@ -266,15 +277,30 @@ export const recordLoanPayment = async (
 
   // Use database transaction
   return await prisma.$transaction(async (tx) => {
-    // 1. Create INCOME transaction (money coming into account)
-    const transaction = await transactionService.createTransaction(userId, {
-      accountId: data.accountId,
-      type: 'INCOME',
-      amount: data.amount,
-      categoryId,
-      description: `Pago de préstamo de ${loan.borrowerName}`,
-      date: data.paymentDate,
-      payer: loan.borrowerName,
+    // 1. Create INCOME transaction (money coming into account) - inline to avoid nested transaction
+    const transaction = await tx.transaction.create({
+      data: {
+        userId,
+        accountId: data.accountId,
+        type: 'INCOME',
+        amount: data.amount,
+        categoryId,
+        description: `Pago de préstamo de ${loan.borrowerName}`,
+        date: data.paymentDate ? new Date(data.paymentDate) : new Date(),
+        payer: loan.borrowerName,
+      },
+      include: {
+        account: {
+          select: { name: true, currency: true, type: true },
+        },
+      },
+    });
+
+    // Update account balance
+    const balanceChange = account.type === 'CREDIT' ? -data.amount : data.amount;
+    await tx.account.update({
+      where: { id: account.id },
+      data: { balance: { increment: balanceChange } },
     });
 
     // 2. Create loan payment record

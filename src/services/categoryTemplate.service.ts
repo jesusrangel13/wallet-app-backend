@@ -30,10 +30,12 @@ export class CategoryTemplateService {
 
       if (existingCount > 0) {
         console.log(`✓ CategoryTemplates already initialized (${existingCount} templates found)`);
+        // Check if all templates from DEFAULT_CATEGORY_TEMPLATES exist
+        await this.addMissingTemplates();
         return;
       }
 
-      console.log('Initializing 80 default category templates...');
+      console.log('Initializing 84 default category templates...');
 
       // Crear un mapa de templates por nombre para referencias de parents
       const templatesByName = new Map<string, string>();
@@ -231,5 +233,75 @@ export class CategoryTemplateService {
         this.mapToHierarchy(sub)
       ) || [],
     };
+  }
+
+  /**
+   * Adds missing templates from DEFAULT_CATEGORY_TEMPLATES that don't exist in DB
+   */
+  static async addMissingTemplates(): Promise<void> {
+    try {
+      // Get all existing templates
+      const existingTemplates = await prisma.categoryTemplate.findMany({
+        select: { name: true, id: true },
+      });
+
+      const existingNames = new Set(existingTemplates.map(t => t.name));
+      const templatesByName = new Map(existingTemplates.map(t => [t.name, t.id]));
+
+      // Find parent categories to add
+      const missingParents = DEFAULT_CATEGORY_TEMPLATES
+        .filter(t => !t.parentName && !existingNames.has(t.name));
+
+      // Add missing parent templates
+      for (const template of missingParents) {
+        const created = await prisma.categoryTemplate.create({
+          data: {
+            name: template.name,
+            icon: template.icon,
+            color: template.color,
+            type: template.type,
+            orderIndex: template.orderIndex,
+            isSystem: true,
+            parentTemplateId: null,
+          },
+        });
+        templatesByName.set(template.name, created.id);
+        console.log(`✓ Added missing parent template: ${template.name}`);
+      }
+
+      // Find child categories to add
+      const missingChildren = DEFAULT_CATEGORY_TEMPLATES
+        .filter(t => t.parentName && !existingNames.has(t.name));
+
+      // Add missing child templates
+      for (const template of missingChildren) {
+        const parentId = templatesByName.get(template.parentName!);
+
+        if (!parentId) {
+          console.warn(`Parent template not found for: ${template.name} (parent: ${template.parentName})`);
+          continue;
+        }
+
+        await prisma.categoryTemplate.create({
+          data: {
+            name: template.name,
+            icon: template.icon,
+            color: template.color,
+            type: template.type,
+            orderIndex: template.orderIndex,
+            isSystem: true,
+            parentTemplateId: parentId,
+          },
+        });
+        console.log(`✓ Added missing child template: ${template.name} (parent: ${template.parentName})`);
+      }
+
+      const totalAdded = missingParents.length + missingChildren.length;
+      if (totalAdded > 0) {
+        console.log(`✓ Added ${totalAdded} missing category templates`);
+      }
+    } catch (error) {
+      console.error('Error adding missing templates:', error);
+    }
   }
 }

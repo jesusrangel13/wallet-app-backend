@@ -353,7 +353,18 @@ export const getTransactions = async (
         select: { name: true, currency: true },
       },
       sharedExpense: {
-        select: { id: true, description: true, groupId: true },
+        select: {
+          id: true,
+          description: true,
+          groupId: true,
+          paidByUserId: true,
+          participants: {
+            select: {
+              isPaid: true,
+              userId: true,
+            },
+          },
+        },
       },
     },
     orderBy,

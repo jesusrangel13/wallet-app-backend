@@ -596,20 +596,19 @@ export const calculateSimplifiedDebts = async (userId: string, groupId: string) 
   });
 
   expenses.forEach((expense) => {
-    balances[expense.paidByUserId] += Number(expense.amount);
+    // Only count unpaid participants to avoid counting already-paid expenses
+    let unpaidTotal = 0;
     expense.participants.forEach((participant) => {
-      balances[participant.userId] -= Number(participant.amountOwed);
+      if (!participant.isPaid) {
+        balances[participant.userId] -= Number(participant.amountOwed);
+        unpaidTotal += Number(participant.amountOwed);
+      }
     });
-  });
 
-  // Subtract payments
-  const payments = await prisma.payment.findMany({
-    where: { groupId },
-  });
-
-  payments.forEach((payment) => {
-    balances[payment.fromUserId] -= Number(payment.amount);
-    balances[payment.toUserId] += Number(payment.amount);
+    // Only add to payer's balance if there are unpaid amounts
+    if (unpaidTotal > 0) {
+      balances[expense.paidByUserId] += unpaidTotal;
+    }
   });
 
   // Simplify debts using greedy algorithm
@@ -1076,7 +1075,7 @@ export const settleAllBalance = async (
             type: 'EXPENSE',
             accountId: initiatorAccountId,
             categoryId: debtPaymentCategory?.id,
-            description: `Pago de balance compartido a ${otherUser?.name} - Saldado en grupo. ${expenses.length} gasto(s) compartido(s).`,
+            description: `Pago de balance compartido a ${otherUser?.name}.`,
             date: new Date().toISOString(),
             tags: [],
           }),
@@ -1086,7 +1085,7 @@ export const settleAllBalance = async (
             type: 'INCOME',
             accountId: otherUserAccountId,
             categoryId: debtCollectionCategory?.id,
-            description: `Recibido de ${initiatorUser?.name} por balance compartido - Saldado en grupo. ${expenses.length} gasto(s) compartido(s).`,
+            description: `Recibido de ${initiatorUser?.name} por balance compartido.`,
             date: new Date().toISOString(),
             tags: [],
           }),
@@ -1101,7 +1100,7 @@ export const settleAllBalance = async (
             type: 'INCOME',
             accountId: initiatorAccountId,
             categoryId: debtCollectionCategory?.id,
-            description: `Recibido de ${otherUser?.name} por balance compartido - Saldado en grupo. ${expenses.length} gasto(s) compartido(s).`,
+            description: `Recibido de ${otherUser?.name} por balance compartido.`,
             date: new Date().toISOString(),
             tags: [],
           }),
@@ -1111,7 +1110,7 @@ export const settleAllBalance = async (
             type: 'EXPENSE',
             accountId: otherUserAccountId,
             categoryId: debtPaymentCategory?.id,
-            description: `Pago de balance compartido a ${initiatorUser?.name} - Saldado en grupo. ${expenses.length} gasto(s) compartido(s).`,
+            description: `Pago de balance compartido a ${initiatorUser?.name}.`,
             date: new Date().toISOString(),
             tags: [],
           }),
@@ -1224,11 +1223,6 @@ export const getUserBalances = async (userId: string) => {
       },
     });
 
-    // Get all payments in this group
-    const payments = await prisma.payment.findMany({
-      where: { groupId },
-    });
-
     // Calculate what others owe this user
     let othersOweMe = 0;
     const peopleWhoOweMe: Record<string, { amount: number; totalHistorical: number; totalPaid: number; user: any; unpaidExpenses: any[]; paidExpenses: any[] }> = {};
@@ -1328,11 +1322,17 @@ export const getUserBalances = async (userId: string) => {
       }
     });
 
+    // Calculate total shared expenses for the group
+    const totalSharedExpenses = expenses.reduce((sum, expense) => {
+      return sum + Number(expense.amount);
+    }, 0);
+
     return {
       group: membership.group,
       othersOweMe,
       iOweOthers,
       netBalance: othersOweMe - iOweOthers,
+      totalSharedExpenses,
       peopleWhoOweMe: Object.values(peopleWhoOweMe),
       peopleIOweTo: Object.values(peopleIOweTo),
     };

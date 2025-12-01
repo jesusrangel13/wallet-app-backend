@@ -3,9 +3,9 @@ import { resolveCategoriesBatch } from './categoryResolver.service';
 
 const prisma = new PrismaClient();
 
-export const getCashFlow = async (userId: string, months: number = 6) => {
-  const endDate = new Date();
-  const startDate = new Date();
+export const getCashFlow = async (userId: string, months: number = 6, endDate?: Date) => {
+  const end = endDate || new Date();
+  const startDate = new Date(end);
   startDate.setMonth(startDate.getMonth() - months);
 
   // Get transactions grouped by month
@@ -14,7 +14,7 @@ export const getCashFlow = async (userId: string, months: number = 6) => {
       userId,
       date: {
         gte: startDate,
-        lte: endDate,
+        lte: end,
       },
     },
     select: {
@@ -60,10 +60,12 @@ export const getCashFlow = async (userId: string, months: number = 6) => {
   return result;
 };
 
-export const getExpensesByCategory = async (userId: string) => {
+export const getExpensesByCategory = async (userId: string, month?: number, year?: number) => {
   const now = new Date();
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const targetMonth = month !== undefined ? month : now.getMonth();
+  const targetYear = year !== undefined ? year : now.getFullYear();
+  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
+  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
 
   const expenses = await prisma.transaction.findMany({
     where: {
@@ -110,10 +112,12 @@ export const getExpensesByCategory = async (userId: string) => {
   return result;
 };
 
-export const getExpensesByParentCategory = async (userId: string) => {
+export const getExpensesByParentCategory = async (userId: string, month?: number, year?: number) => {
   const now = new Date();
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const targetMonth = month !== undefined ? month : now.getMonth();
+  const targetYear = year !== undefined ? year : now.getFullYear();
+  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
+  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
 
   const expenses = await prisma.transaction.findMany({
     where: {
@@ -176,9 +180,9 @@ export const getExpensesByParentCategory = async (userId: string) => {
   return result;
 };
 
-export const getBalanceHistory = async (userId: string, days: number = 30) => {
-  const endDate = new Date();
-  const startDate = new Date();
+export const getBalanceHistory = async (userId: string, days: number = 30, endDate?: Date) => {
+  const end = endDate || new Date();
+  const startDate = new Date(end);
   startDate.setDate(startDate.getDate() - days);
 
   // Optimize: Use database aggregation instead of loading all transactions into memory
@@ -188,7 +192,7 @@ export const getBalanceHistory = async (userId: string, days: number = 30) => {
       userId,
       date: {
         gte: startDate,
-        lte: endDate,
+        lte: end,
       },
     },
     select: {
@@ -268,7 +272,7 @@ export const getBalanceHistory = async (userId: string, days: number = 30) => {
   return dailyBalances;
 };
 
-export const getGroupBalances = async (userId: string) => {
+export const getGroupBalances = async (userId: string, month?: number, year?: number) => {
   // Get all groups where the user is a member
   const groupMembers = await prisma.groupMember.findMany({
     where: {
@@ -418,7 +422,7 @@ export const getAccountBalances = async (userId: string) => {
  * Unified dashboard summary endpoint that returns all widget data in a single request
  * This eliminates the need for multiple API calls to load the dashboard
  */
-export const getDashboardSummary = async (userId: string) => {
+export const getDashboardSummary = async (userId: string, month?: number, year?: number) => {
   try {
     // Fetch all dashboard data in parallel
     const [
@@ -429,9 +433,9 @@ export const getDashboardSummary = async (userId: string) => {
       accountBalances,
     ] = await Promise.all([
       getCashFlow(userId),
-      getExpensesByCategory(userId),
+      getExpensesByCategory(userId, month, year),
       getBalanceHistory(userId),
-      getGroupBalances(userId),
+      getGroupBalances(userId, month, year),
       getAccountBalances(userId),
     ]);
 
@@ -453,10 +457,12 @@ export const getDashboardSummary = async (userId: string) => {
  * Get personal expenses for current month
  * Excludes: shared expenses, transfers, and "Inversiones" category
  */
-export const getPersonalExpenses = async (userId: string) => {
+export const getPersonalExpenses = async (userId: string, month?: number, year?: number) => {
   const now = new Date();
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const targetMonth = month !== undefined ? month : now.getMonth();
+  const targetYear = year !== undefined ? year : now.getFullYear();
+  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
+  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
 
   // Find "Inversiones" category to exclude it
   const inversionesCategory = await prisma.categoryTemplate.findFirst({
@@ -490,9 +496,10 @@ export const getPersonalExpenses = async (userId: string) => {
     },
   });
 
+  const monthDate = new Date(targetYear, targetMonth);
   return {
     total: Number(result._sum.amount || 0),
-    month: now.toLocaleString('default', { month: 'long', year: 'numeric' }),
+    month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
   };
 };
 
@@ -500,43 +507,45 @@ export const getPersonalExpenses = async (userId: string) => {
  * Get shared expenses total for current month
  * Calculates user's share from ExpenseParticipant.amountOwed
  */
-export const getSharedExpensesTotal = async (userId: string) => {
+export const getSharedExpensesTotal = async (userId: string, month?: number, year?: number) => {
   const now = new Date();
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const targetMonth = month !== undefined ? month : now.getMonth();
+  const targetYear = year !== undefined ? year : now.getFullYear();
+  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
+  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
 
-  // Get all shared expense transactions for the user
-  const sharedExpenses = await prisma.transaction.findMany({
+  // Get shared expenses where the user is a participant
+  // Filter by SharedExpense.date (when expense occurred), NOT Transaction.date (when marked as paid)
+  const sharedExpenses = await prisma.sharedExpense.findMany({
     where: {
-      userId,
-      type: 'EXPENSE',
-      sharedExpenseId: { not: null },
       date: {
         gte: firstDayOfMonth,
         lte: lastDayOfMonth,
       },
+      participants: {
+        some: {
+          userId,
+        },
+      },
     },
     include: {
-      sharedExpense: {
-        include: {
-          participants: {
-            where: { userId }, // Only get current user's participation
-          },
-        },
+      participants: {
+        where: { userId }, // Only get current user's participation
       },
     },
   });
 
   // Sum user's share from ExpenseParticipant.amountOwed
-  const total = sharedExpenses.reduce((sum, tx) => {
-    const userParticipation = tx.sharedExpense?.participants[0];
+  const total = sharedExpenses.reduce((sum, expense) => {
+    const userParticipation = expense.participants[0];
     return sum + Number(userParticipation?.amountOwed || 0);
   }, 0);
 
+  const monthDate = new Date(targetYear, targetMonth);
   return {
     total,
     count: sharedExpenses.length,
-    month: now.toLocaleString('default', { month: 'long', year: 'numeric' }),
+    month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
   };
 };
 
@@ -544,10 +553,12 @@ export const getSharedExpensesTotal = async (userId: string) => {
  * Get monthly savings
  * Calculation: Total Income - (Personal Expenses + Shared Expenses portion)
  */
-export const getMonthlySavings = async (userId: string) => {
+export const getMonthlySavings = async (userId: string, month?: number, year?: number) => {
   const now = new Date();
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const targetMonth = month !== undefined ? month : now.getMonth();
+  const targetYear = year !== undefined ? year : now.getFullYear();
+  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
+  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
 
   // Get total income
   const incomeResult = await prisma.transaction.aggregate({
@@ -567,11 +578,11 @@ export const getMonthlySavings = async (userId: string) => {
   const totalIncome = Number(incomeResult._sum.amount || 0);
 
   // Get personal expenses (excluding shared and transfers)
-  const personalExpensesData = await getPersonalExpenses(userId);
+  const personalExpensesData = await getPersonalExpenses(userId, month, year);
   const personalExpenses = personalExpensesData.total;
 
   // Get shared expenses (user's share)
-  const sharedExpensesData = await getSharedExpensesTotal(userId);
+  const sharedExpensesData = await getSharedExpensesTotal(userId, month, year);
   const sharedExpenses = sharedExpensesData.total;
 
   // Calculate savings
@@ -579,6 +590,7 @@ export const getMonthlySavings = async (userId: string) => {
   const savings = totalIncome - totalExpenses;
   const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
 
+  const monthDate = new Date(targetYear, targetMonth);
   return {
     savings,
     savingsRate,
@@ -588,6 +600,6 @@ export const getMonthlySavings = async (userId: string) => {
       personal: personalExpenses,
       shared: sharedExpenses,
     },
-    month: now.toLocaleString('default', { month: 'long', year: 'numeric' }),
+    month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
   };
 };

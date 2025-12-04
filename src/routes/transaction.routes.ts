@@ -13,6 +13,7 @@ router.get('/', transactionController.getTransactions);
 router.get('/by-category', transactionController.getTransactionsByCategory);
 router.get('/stats', transactionController.getTransactionStats);
 router.get('/recent', transactionController.getRecentTransactions);
+router.get('/payees', transactionController.getUniquePayees);
 router.get('/:id', transactionController.getTransactionById);
 router.put('/:id', transactionController.updateTransaction);
 router.delete('/:id', transactionController.deleteTransaction);

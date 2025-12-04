@@ -214,3 +214,23 @@ export const getRecentTransactions = async (
     next(error);
   }
 };
+
+export const getUniquePayees = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const search = req.query.search as string | undefined;
+
+    const payees = await transactionService.getUniquePayees(userId, search);
+
+    res.status(200).json({
+      success: true,
+      data: payees,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

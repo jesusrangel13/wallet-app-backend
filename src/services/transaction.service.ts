@@ -969,3 +969,39 @@ export const getRecentTransactions = async (userId: string, limit: number = 5) =
 
   return transactionsWithCategories;
 };
+
+export const getUniquePayees = async (userId: string, search?: string): Promise<string[]> => {
+  const where: any = {
+    userId,
+    payee: {
+      not: null, // Excluir transacciones sin payee
+    },
+  };
+
+  // Si hay término de búsqueda, filtrar payees
+  if (search && search.trim()) {
+    where.payee = {
+      contains: search.trim(),
+      mode: 'insensitive',
+      not: null,
+    };
+  }
+
+  // Obtener payees únicos usando Prisma
+  const transactions = await prisma.transaction.findMany({
+    where,
+    select: {
+      payee: true,
+    },
+    distinct: ['payee'],
+    orderBy: {
+      date: 'desc', // Más recientes primero
+    },
+    take: 50, // Limitar a 50 resultados
+  });
+
+  // Filtrar nulls y retornar solo los strings
+  return transactions
+    .map(t => t.payee)
+    .filter((payee): payee is string => payee !== null && payee.trim() !== '');
+};

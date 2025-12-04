@@ -148,6 +148,7 @@ model Transaction {
   @@index([userId, date])
   @@index([userId, type, date])
   @@index([accountId, date])
+  @@index([userId, payee]) // Index for payee autocomplete queries
   @@map("transactions")
 }
 

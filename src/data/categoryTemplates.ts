@@ -130,4 +130,11 @@ export const DEFAULT_CATEGORY_TEMPLATES: CategoryTemplateData[] = [
   { name: 'Otros', icon: '⭐', color: '#FFD93D', type: 'INCOME', parentName: 'Otros Ingresos', orderIndex: 4 },
   { name: 'Cobro de deuda', icon: '💸', color: '#FFD93D', type: 'INCOME', parentName: 'Otros Ingresos', orderIndex: 5 },
   { name: 'Cobro de préstamo', icon: '💚', color: '#4CAF50', type: 'INCOME', parentName: 'Otros Ingresos', orderIndex: 6 },
+
+  // ========================================
+  // TRANSFER CATEGORY (1 root)
+  // ========================================
+
+  // Transferencia entre cuentas
+  { name: 'Transferencia entre cuentas', icon: '🔄', color: '#4F46E5', type: 'TRANSFER', orderIndex: 1 },
 ];

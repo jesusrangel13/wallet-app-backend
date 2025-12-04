@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import * as notificationService from './notification.service';
+import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
 
@@ -101,11 +102,27 @@ export const createSharedExpense = async (
     select: { name: true },
   });
 
+  // DEBUG: Log para verificar quién está pagando
+  const finalPaidByUserId = data.paidByUserId || userId;
+  console.log('🔍 CREATE SHARED EXPENSE - DEBUG INFO:', {
+    authenticatedUserId: userId,
+    authenticatedUserIdLength: userId.length,
+    authenticatedUserIdType: typeof userId,
+    providedPaidByUserId: data.paidByUserId,
+    providedPaidByUserIdLength: data.paidByUserId ? data.paidByUserId.length : 0,
+    providedPaidByUserIdType: typeof data.paidByUserId,
+    finalPaidByUserId,
+    finalPaidByUserIdLength: finalPaidByUserId.length,
+    finalPaidByUserIdType: typeof finalPaidByUserId,
+    groupId: data.groupId,
+    amount: data.amount,
+  });
+
   // Create expense with participants
   const expense = await prisma.sharedExpense.create({
     data: {
       groupId: data.groupId,
-      paidByUserId: data.paidByUserId || userId, // Use provided paidByUserId or fallback to authenticated user
+      paidByUserId: finalPaidByUserId, // Use provided paidByUserId or fallback to authenticated user
       amount: data.amount,
       description: data.description,
       categoryId: data.categoryId,
@@ -346,7 +363,11 @@ export const updateSharedExpense = async (
   return updatedExpense;
 };
 
-export const getSharedExpenses = async (userId: string, groupId?: string) => {
+export const getSharedExpenses = async (
+  userId: string,
+  groupId?: string,
+  pagination?: PaginationParams
+) => {
   const where: any = {
     group: {
       members: {
@@ -361,6 +382,15 @@ export const getSharedExpenses = async (userId: string, groupId?: string) => {
     where.groupId = groupId;
   }
 
+  // Pagination parameters
+  const page = pagination?.page || 1;
+  const limit = Math.min(pagination?.limit || 50, 200); // Max 200 per page
+  const skip = calculateSkip(page, limit);
+
+  // Get total count for pagination metadata
+  const total = await prisma.sharedExpense.count({ where });
+
+  // Get paginated expenses
   const expenses = await prisma.sharedExpense.findMany({
     where,
     include: {
@@ -390,9 +420,14 @@ export const getSharedExpenses = async (userId: string, groupId?: string) => {
       },
     },
     orderBy: { createdAt: 'desc' },
+    skip,
+    take: limit,
   });
 
-  return expenses;
+  return {
+    data: expenses,
+    pagination: calculatePagination(page, limit, total),
+  };
 };
 
 export const getSharedExpenseById = async (userId: string, expenseId: string) => {
@@ -522,7 +557,11 @@ export const settlePayment = async (
   return payment;
 };
 
-export const getPaymentHistory = async (userId: string, groupId?: string) => {
+export const getPaymentHistory = async (
+  userId: string,
+  groupId?: string,
+  pagination?: PaginationParams
+) => {
   const where: any = {
     OR: [{ fromUserId: userId }, { toUserId: userId }],
   };
@@ -531,6 +570,15 @@ export const getPaymentHistory = async (userId: string, groupId?: string) => {
     where.groupId = groupId;
   }
 
+  // Pagination parameters
+  const page = pagination?.page || 1;
+  const limit = Math.min(pagination?.limit || 50, 200); // Max 200 per page
+  const skip = calculateSkip(page, limit);
+
+  // Get total count for pagination metadata
+  const total = await prisma.payment.count({ where });
+
+  // Get paginated payments
   const payments = await prisma.payment.findMany({
     where,
     include: {
@@ -556,9 +604,14 @@ export const getPaymentHistory = async (userId: string, groupId?: string) => {
       },
     },
     orderBy: { createdAt: 'desc' },
+    skip,
+    take: limit,
   });
 
-  return payments;
+  return {
+    data: payments,
+    pagination: calculatePagination(page, limit, total),
+  };
 };
 
 export const calculateSimplifiedDebts = async (userId: string, groupId: string) => {
@@ -1179,7 +1232,7 @@ export const settleAllBalance = async (
 };
 
 // Get user's balances across all groups
-export const getUserBalances = async (userId: string) => {
+export const getUserBalances = async (userId: string, month?: number, year?: number) => {
   // Get all groups the user is a member of
   const groups = await prisma.groupMember.findMany({
     where: { userId },
@@ -1198,9 +1251,23 @@ export const getUserBalances = async (userId: string) => {
   const balancePromises = groups.map(async (membership) => {
     const groupId = membership.groupId;
 
+    // Build where clause with optional date filter
+    const whereClause: any = { groupId };
+
+    if (month !== undefined && year !== undefined) {
+      // Filter expenses by month and year
+      const startDate = new Date(year, month, 1);
+      const endDate = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
+      whereClause.date = {
+        gte: startDate,
+        lte: endDate,
+      };
+    }
+
     // Get all expenses in this group
     const expenses = await prisma.sharedExpense.findMany({
-      where: { groupId },
+      where: whereClause,
       include: {
         participants: {
           include: {

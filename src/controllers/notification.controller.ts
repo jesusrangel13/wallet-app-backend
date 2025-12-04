@@ -11,13 +11,17 @@ export const getAllNotifications = async (
 ) => {
   try {
     const userId = (req as any).user.userId;
-    const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
 
-    const notifications = await notificationService.getAllNotifications(userId, limit);
+    // Extract pagination parameters
+    const page = req.query.page ? Number(req.query.page) : undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const pagination = page || limit ? { page, limit } : undefined;
+
+    const result = await notificationService.getAllNotifications(userId, pagination);
 
     res.status(200).json({
       success: true,
-      data: notifications,
+      ...result,
     });
   } catch (error) {
     next(error);

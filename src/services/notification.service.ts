@@ -1,5 +1,6 @@
 import { PrismaClient, NotificationType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
 
@@ -35,16 +36,29 @@ export const createNotification = async ({
 };
 
 /**
- * Get all notifications for a user
+ * Get all notifications for a user with pagination
  */
-export const getAllNotifications = async (userId: string, limit: number = 50) => {
+export const getAllNotifications = async (userId: string, pagination?: PaginationParams) => {
+  // Pagination parameters
+  const page = pagination?.page || 1;
+  const limit = Math.min(pagination?.limit || 50, 100); // Max 100 per page
+  const skip = calculateSkip(page, limit);
+
+  // Get total count for pagination metadata
+  const total = await prisma.notification.count({ where: { userId } });
+
+  // Get paginated notifications
   const notifications = await prisma.notification.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },
+    skip,
     take: limit,
   });
 
-  return notifications;
+  return {
+    data: notifications,
+    pagination: calculatePagination(page, limit, total),
+  };
 };
 
 /**

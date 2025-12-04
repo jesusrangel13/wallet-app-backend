@@ -12,7 +12,7 @@ router.post('/bulk-delete', transactionController.bulkDeleteTransactions);
 router.get('/', transactionController.getTransactions);
 router.get('/by-category', transactionController.getTransactionsByCategory);
 router.get('/stats', transactionController.getTransactionStats);
-router.get('/recent', transactionController.getRecentTransactions);ß
+router.get('/recent', transactionController.getRecentTransactions);
 router.get('/:id', transactionController.getTransactionById);
 router.put('/:id', transactionController.updateTransaction);
 router.delete('/:id', transactionController.deleteTransaction);

@@ -30,12 +30,26 @@ export const getGroups = async (
 ) => {
   try {
     const userId = (req as any).user.userId;
-    const groups = await groupService.getGroups(userId);
 
-    res.status(200).json({
-      success: true,
-      data: groups,
-    });
+    // Extract optional pagination parameters
+    const page = req.query.page ? Number(req.query.page) : undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const pagination = page || limit ? { page, limit } : undefined;
+
+    const result = await groupService.getGroups(userId, pagination);
+
+    // Handle both paginated and non-paginated responses
+    if (result && 'data' in result && 'pagination' in result) {
+      res.status(200).json({
+        success: true,
+        ...result,
+      });
+    } else {
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    }
   } catch (error) {
     next(error);
   }

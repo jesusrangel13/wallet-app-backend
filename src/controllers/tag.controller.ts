@@ -29,11 +29,17 @@ export const getTags = async (
 ) => {
   try {
     const userId = (req as any).user.userId;
-    const tags = await tagService.getTags(userId);
+
+    // Extract pagination parameters
+    const page = req.query.page ? Number(req.query.page) : undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const pagination = page || limit ? { page, limit } : undefined;
+
+    const result = await tagService.getTags(userId, pagination);
 
     res.status(200).json({
       success: true,
-      data: tags,
+      ...result,
     });
   } catch (error) {
     next(error);

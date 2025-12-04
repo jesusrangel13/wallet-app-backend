@@ -36,11 +36,16 @@ export const getImportHistory = async (
   try {
     const userId = (req as any).user.userId;
 
-    const imports = await importService.getImportHistory(userId);
+    // Extract pagination parameters
+    const page = req.query.page ? Number(req.query.page) : undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const pagination = page || limit ? { page, limit } : undefined;
+
+    const result = await importService.getImportHistory(userId, pagination);
 
     res.status(200).json({
       success: true,
-      data: imports,
+      ...result,
     });
   } catch (error) {
     next(error);

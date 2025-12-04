@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { PaginationParams, calculatePagination, calculateSkip, PaginatedResponse } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
 
@@ -37,19 +38,37 @@ export const createBudget = async (userId: string, data: CreateBudgetData) => {
   return budget;
 };
 
-export const getBudgets = async (userId: string, year?: number) => {
+export const getBudgets = async (
+  userId: string,
+  year?: number,
+  pagination?: PaginationParams
+): Promise<PaginatedResponse<any>> => {
   const where: any = { userId };
 
   if (year) {
     where.year = year;
   }
 
+  // Pagination parameters with defaults
+  const page = pagination?.page || 1;
+  const limit = Math.min(pagination?.limit || 50, 100); // Default 50, max 100
+  const skip = calculateSkip(page, limit);
+
+  // Get total count for pagination metadata
+  const total = await prisma.budget.count({ where });
+
+  // Get paginated budgets
   const budgets = await prisma.budget.findMany({
     where,
     orderBy: [{ year: 'desc' }, { month: 'desc' }],
+    skip,
+    take: limit,
   });
 
-  return budgets;
+  return {
+    data: budgets,
+    pagination: calculatePagination(page, limit, total),
+  };
 };
 
 export const getBudgetById = async (userId: string, budgetId: string) => {

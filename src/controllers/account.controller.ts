@@ -29,11 +29,17 @@ export const getAccounts = async (
 ) => {
   try {
     const userId = (req as any).user.userId;
-    const accounts = await accountService.getAccounts(userId);
 
+    // Extract pagination parameters
+    const page = req.query.page ? Number(req.query.page) : undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const pagination = page || limit ? { page, limit } : undefined;
+
+    const result = await accountService.getAccounts(userId, pagination);
+    console.log(result)
     res.status(200).json({
       success: true,
-      data: accounts,
+      ...result,
     });
   } catch (error) {
     next(error);
@@ -132,6 +138,28 @@ export const getTotalBalance = async (
     res.status(200).json({
       success: true,
       data: balance,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getAccountBalanceHistory = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { id } = req.params;
+    const month = req.query.month ? parseInt(req.query.month as string) : undefined;
+    const year = req.query.year ? parseInt(req.query.year as string) : undefined;
+
+    const history = await accountService.getAccountBalanceHistory(userId, id, month, year);
+
+    res.status(200).json({
+      success: true,
+      data: history,
     });
   } catch (error) {
     next(error);

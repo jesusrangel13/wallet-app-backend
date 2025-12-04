@@ -30,11 +30,17 @@ export const getBudgets = async (
   try {
     const userId = (req as any).user.userId;
     const year = req.query.year ? Number(req.query.year) : undefined;
-    const budgets = await budgetService.getBudgets(userId, year);
+
+    // Extract pagination parameters
+    const page = req.query.page ? Number(req.query.page) : undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const pagination = page || limit ? { page, limit } : undefined;
+
+    const result = await budgetService.getBudgets(userId, year, pagination);
 
     res.status(200).json({
       success: true,
-      data: budgets,
+      ...result,
     });
   } catch (error) {
     next(error);

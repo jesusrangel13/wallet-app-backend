@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { resolveCategoriesBatch } from './categoryResolver.service';
 import { createTransaction } from './transaction.service';
+import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
 
@@ -352,7 +353,16 @@ export const importTransactions = async (
   };
 };
 
-export const getImportHistory = async (userId: string) => {
+export const getImportHistory = async (userId: string, pagination?: PaginationParams) => {
+  // Pagination parameters
+  const page = pagination?.page || 1;
+  const limit = Math.min(pagination?.limit || 20, 100); // Max 100 per page
+  const skip = calculateSkip(page, limit);
+
+  // Get total count for pagination metadata
+  const total = await prisma.importHistory.count({ where: { userId } });
+
+  // Get paginated imports
   const imports = await prisma.importHistory.findMany({
     where: { userId },
     include: {
@@ -379,9 +389,14 @@ export const getImportHistory = async (userId: string) => {
     orderBy: {
       importedAt: 'desc',
     },
+    skip,
+    take: limit,
   });
 
-  return imports;
+  return {
+    data: imports,
+    pagination: calculatePagination(page, limit, total),
+  };
 };
 
 export const getImportHistoryById = async (userId: string, importId: string) => {
@@ -433,11 +448,11 @@ export const getImportHistoryById = async (userId: string, importId: string) => 
     ...tx,
     transaction: tx.transaction
       ? {
-          ...tx.transaction,
-          category: tx.transaction.categoryId
-            ? categoryMap.get(tx.transaction.categoryId) || null
-            : null,
-        }
+        ...tx.transaction,
+        category: tx.transaction.categoryId
+          ? categoryMap.get(tx.transaction.categoryId) || null
+          : null,
+      }
       : null,
   }));
 

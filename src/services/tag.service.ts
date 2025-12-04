@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { PaginationParams, calculatePagination, calculateSkip, PaginatedResponse } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
 
@@ -37,13 +38,30 @@ export const createTag = async (userId: string, data: CreateTagData) => {
   return tag;
 };
 
-export const getTags = async (userId: string) => {
+export const getTags = async (
+  userId: string,
+  pagination?: PaginationParams
+): Promise<PaginatedResponse<any>> => {
+  // Pagination parameters with defaults
+  const page = pagination?.page || 1;
+  const limit = Math.min(pagination?.limit || 50, 200); // Default 50, max 200
+  const skip = calculateSkip(page, limit);
+
+  // Get total count for pagination metadata
+  const total = await prisma.tag.count({ where: { userId } });
+
+  // Get paginated tags
   const tags = await prisma.tag.findMany({
     where: { userId },
     orderBy: { name: 'asc' },
+    skip,
+    take: limit,
   });
 
-  return tags;
+  return {
+    data: tags,
+    pagination: calculatePagination(page, limit, total),
+  };
 };
 
 export const getTagById = async (userId: string, id: string) => {

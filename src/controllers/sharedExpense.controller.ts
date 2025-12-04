@@ -58,11 +58,17 @@ export const getSharedExpenses = async (
   try {
     const userId = (req as any).user.userId;
     const groupId = req.query.groupId as string | undefined;
-    const expenses = await sharedExpenseService.getSharedExpenses(userId, groupId);
+
+    // Extract pagination parameters
+    const page = req.query.page ? Number(req.query.page) : undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const pagination = page || limit ? { page, limit } : undefined;
+
+    const result = await sharedExpenseService.getSharedExpenses(userId, groupId, pagination);
 
     res.status(200).json({
       success: true,
-      data: expenses,
+      ...result,
     });
   } catch (error) {
     next(error);
@@ -140,11 +146,17 @@ export const getPaymentHistory = async (
   try {
     const userId = (req as any).user.userId;
     const groupId = req.query.groupId as string | undefined;
-    const payments = await sharedExpenseService.getPaymentHistory(userId, groupId);
+
+    // Extract pagination parameters
+    const page = req.query.page ? Number(req.query.page) : undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const pagination = page || limit ? { page, limit } : undefined;
+
+    const result = await sharedExpenseService.getPaymentHistory(userId, groupId, pagination);
 
     res.status(200).json({
       success: true,
-      data: payments,
+      ...result,
     });
   } catch (error) {
     next(error);

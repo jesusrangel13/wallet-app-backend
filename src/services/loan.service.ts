@@ -2,6 +2,7 @@ import { PrismaClient, LoanStatus } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import * as transactionService from './transaction.service';
 import { searchCategoriesByName } from './categoryResolver.service';
+import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
 
@@ -21,7 +22,7 @@ interface RecordPaymentData {
   notes?: string;
 }
 
-interface LoanFilters {
+interface LoanFilters extends PaginationParams {
   status?: LoanStatus;
   borrowerName?: string;
 }
@@ -144,6 +145,15 @@ export const getUserLoans = async (userId: string, filters?: LoanFilters) => {
     };
   }
 
+  // Pagination parameters
+  const page = filters?.page || 1;
+  const limit = Math.min(filters?.limit || 50, 200); // Max 200 per page
+  const skip = calculateSkip(page, limit);
+
+  // Get total count for pagination metadata
+  const total = await prisma.loan.count({ where });
+
+  // Get paginated loans
   const loans = await prisma.loan.findMany({
     where,
     include: {
@@ -178,9 +188,14 @@ export const getUserLoans = async (userId: string, filters?: LoanFilters) => {
     orderBy: {
       loanDate: 'desc',
     },
+    skip,
+    take: limit,
   });
 
-  return loans;
+  return {
+    data: loans,
+    pagination: calculatePagination(page, limit, total),
+  };
 };
 
 /**

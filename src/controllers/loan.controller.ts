@@ -46,11 +46,19 @@ export const getUserLoans = async (
       filters.borrowerName = req.query.borrowerName as string;
     }
 
-    const loans = await loanService.getUserLoans(userId, filters);
+    // Extract pagination parameters
+    if (req.query.page) {
+      filters.page = Number(req.query.page);
+    }
+    if (req.query.limit) {
+      filters.limit = Number(req.query.limit);
+    }
+
+    const result = await loanService.getUserLoans(userId, filters);
 
     res.status(200).json({
       success: true,
-      data: loans,
+      ...result,
     });
   } catch (error) {
     next(error);

@@ -22,6 +22,15 @@ const baseAccountSchema = z.object({
   currency: z.enum(['CLP', 'USD', 'EUR']).default('CLP'),
   isDefault: z.boolean().optional().default(false),
   includeInTotalBalance: z.boolean().optional().default(true),
+  // Additional account fields
+  accountNumber: z.preprocess(
+    (val) => (val === '' || val === null ? undefined : val),
+    z.string().regex(/^\d+$/, 'Account number must contain only numbers').optional()
+  ),
+  color: z.preprocess(
+    (val) => (val === '' || val === null ? undefined : val),
+    z.string().regex(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/, 'Invalid hex color').optional()
+  ),
   // Credit card specific fields
   creditLimit: z.number().positive().optional(),
   billingDay: z.number().min(1).max(31).optional(),

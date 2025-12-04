@@ -82,8 +82,8 @@ export const getMyBalances = async (
 ) => {
   try {
     const userId = (req as any).user.userId;
-    const month = req.query.month !== undefined ? parseInt(req.query.month as string) : undefined;
-    const year = req.query.year !== undefined ? parseInt(req.query.year as string) : undefined;
+    const month = req.query.month ? parseInt(req.query.month as string) : undefined;
+    const year = req.query.year ? parseInt(req.query.year as string) : undefined;
 
     const balances = await sharedExpenseService.getUserBalances(userId, month, year);
 

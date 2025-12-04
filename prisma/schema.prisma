@@ -68,6 +68,10 @@ model Account {
   isArchived  Boolean  @default(false) @map("is_archived") // Soft delete for accounts
   includeInTotalBalance Boolean @default(true) @map("include_in_total_balance") // Whether to include this account in total balance calculation
 
+  // Additional account fields
+  accountNumber String?  @map("account_number") // Optional account number (numeric string)
+  color         String?  // Hex color code (#RRGGBB)
+
   // Credit card specific fields
   creditLimit Decimal? @db.Decimal(15, 2) @map("credit_limit") // Only for CREDIT type
   billingDay  Int?     @map("billing_day") // Day of month (1-31) for statement generation
@@ -140,6 +144,10 @@ model Transaction {
   @@index([toAccountId])
   @@index([sharedExpenseId])
   @@index([loanId])
+  // Composite indexes for common query patterns
+  @@index([userId, date])
+  @@index([userId, type, date])
+  @@index([accountId, date])
   @@map("transactions")
 }
 
@@ -346,6 +354,9 @@ model SharedExpense {
   @@index([groupId])
   @@index([paidByUserId])
   @@index([categoryId])
+  // Composite indexes for common query patterns
+  @@index([groupId, date])
+  @@index([paidByUserId, date])
   @@map("shared_expenses")
 }
 
@@ -376,6 +387,8 @@ model ExpenseParticipant {
   @@unique([expenseId, userId])
   @@index([expenseId])
   @@index([userId])
+  // Composite index for querying unpaid debts
+  @@index([userId, isPaid])
   @@map("expense_participants")
 }
 
@@ -396,6 +409,9 @@ model Payment {
   @@index([groupId])
   @@index([fromUserId])
   @@index([toUserId])
+  // Composite indexes for payment history queries
+  @@index([fromUserId, date])
+  @@index([toUserId, date])
   @@map("payments")
 }
 
@@ -426,6 +442,8 @@ model Loan {
 
   @@index([userId, status])
   @@index([borrowerUserId])
+  // Composite index for loan history queries
+  @@index([userId, loanDate])
   @@map("loans")
 }
 

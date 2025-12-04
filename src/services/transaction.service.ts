@@ -666,6 +666,9 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
             toAccount: true,
           },
         },
+        paidBy: {
+          select: { id: true, email: true, name: true },
+        },
       },
     });
 
@@ -673,8 +676,29 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
       throw new AppError('Shared expense not found', 404);
     }
 
+    // Normalizar IDs para comparación robusta
+    const normalizedPaidByUserId = sharedExpense.paidByUserId.trim().toLowerCase();
+    const normalizedRequestingUserId = userId.trim().toLowerCase();
+
+    // DEBUG: Log detallado para entender el problema
+    console.log('🔍 DELETE SHARED EXPENSE - DEBUG INFO:', {
+      sharedExpenseId: sharedExpense.id,
+      paidByUserId: sharedExpense.paidByUserId,
+      paidByUserIdLength: sharedExpense.paidByUserId.length,
+      paidByUserIdType: typeof sharedExpense.paidByUserId,
+      paidByEmail: sharedExpense.paidBy.email,
+      requestingUserId: userId,
+      requestingUserIdLength: userId.length,
+      requestingUserIdType: typeof userId,
+      normalizedPaidByUserId,
+      normalizedRequestingUserId,
+      normalizedMatch: normalizedPaidByUserId === normalizedRequestingUserId,
+      directMatch: sharedExpense.paidByUserId === userId,
+    });
+
     // VALIDATION: Only the person who paid can delete the shared expense
-    if (sharedExpense.paidByUserId !== userId) {
+    // Usamos IDs normalizados para manejar diferencias en mayúsculas/minúsculas o espacios
+    if (normalizedPaidByUserId !== normalizedRequestingUserId) {
       throw new AppError(
         'Solo la persona que pagó puede eliminar este gasto compartido',
         403

@@ -392,20 +392,12 @@ export const getAccountBalances = async (userId: string) => {
       balance: true,
       currency: true,
       creditLimit: true,
+      color: true,
     },
     orderBy: {
       createdAt: 'asc',
     },
   });
-
-  // Color mapping based on account type
-  const accountTypeColors: Record<string, string> = {
-    CASH: '#10b981',
-    DEBIT: '#3b82f6',
-    CREDIT: '#f59e0b',
-    SAVINGS: '#8b5cf6',
-    INVESTMENT: '#ec4899',
-  };
 
   return accounts.map(account => ({
     id: account.id,
@@ -414,7 +406,7 @@ export const getAccountBalances = async (userId: string) => {
     balance: Number(account.balance),
     currency: account.currency,
     creditLimit: account.creditLimit ? Number(account.creditLimit) : null,
-    color: accountTypeColors[account.type] || '#3b82f6',
+    color: account.color || '#3b82f6',
   }));
 };
 

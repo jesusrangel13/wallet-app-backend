@@ -14,5 +14,6 @@ router.get('/:id', accountController.getAccountById);
 router.put('/:id', accountController.updateAccount);
 router.delete('/:id', accountController.deleteAccount);
 router.get('/:id/balance', accountController.getAccountBalance);
+router.get('/:id/balance-history', accountController.getAccountBalanceHistory);
 
 export default router;

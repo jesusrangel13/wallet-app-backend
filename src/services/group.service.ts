@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import * as notificationService from './notification.service';
+import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
 
@@ -192,15 +193,61 @@ export const createGroup = async (userId: string, data: CreateGroupData) => {
   };
 };
 
-export const getGroups = async (userId: string) => {
-  const groups = await prisma.group.findMany({
-    where: {
-      members: {
-        some: {
-          userId,
-        },
+export const getGroups = async (userId: string, pagination?: PaginationParams) => {
+  const where = {
+    members: {
+      some: {
+        userId,
       },
     },
+  };
+
+  // If pagination is provided, use it
+  if (pagination) {
+    const page = pagination.page || 1;
+    const limit = Math.min(pagination.limit || 50, 200); // Max 200 per page
+    const skip = calculateSkip(page, limit);
+
+    // Get total count for pagination metadata
+    const total = await prisma.group.count({ where });
+
+    // Get paginated groups
+    const groups = await prisma.group.findMany({
+      where,
+      include: {
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+        defaultSplitSettings: true,
+        _count: {
+          select: {
+            sharedExpenses: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    });
+
+    return {
+      data: groups,
+      pagination: calculatePagination(page, limit, total),
+    };
+  }
+
+  // No pagination - return all groups (backwards compatible)
+  const groups = await prisma.group.findMany({
+    where,
     include: {
       members: {
         include: {

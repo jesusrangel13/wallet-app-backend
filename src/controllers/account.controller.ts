@@ -36,7 +36,6 @@ export const getAccounts = async (
     const pagination = page || limit ? { page, limit } : undefined;
 
     const result = await accountService.getAccounts(userId, pagination);
-    console.log(result)
     res.status(200).json({
       success: true,
       ...result,

@@ -119,6 +119,14 @@ export const createSharedExpense = async (
   });
 
   // Create expense with participants
+  // Mark the person who paid as already paid (isPaid = true)
+  const participantsWithPaymentStatus = participantsWithAmounts.map((p) => ({
+    ...p,
+    isPaid: p.userId === finalPaidByUserId,
+    paidDate: p.userId === finalPaidByUserId ? new Date() : null,
+    paidAmount: p.userId === finalPaidByUserId ? p.amountOwed : null,
+  }));
+
   const expense = await prisma.sharedExpense.create({
     data: {
       groupId: data.groupId,
@@ -129,7 +137,7 @@ export const createSharedExpense = async (
       receiptUrl: data.receiptUrl,
       splitType: data.splitType,
       participants: {
-        create: participantsWithAmounts,
+        create: participantsWithPaymentStatus,
       },
     },
     include: {
@@ -295,6 +303,17 @@ export const updateSharedExpense = async (
       where: { expenseId },
     });
 
+    // Determine who is paying (could be updated)
+    const finalPaidByUserId = data.paidByUserId || expense.paidByUserId;
+
+    // Mark the person who paid as already paid (isPaid = true)
+    const participantsWithPaymentStatus = participantsWithAmounts.map((p) => ({
+      ...p,
+      isPaid: p.userId === finalPaidByUserId,
+      paidDate: p.userId === finalPaidByUserId ? new Date() : null,
+      paidAmount: p.userId === finalPaidByUserId ? p.amountOwed : null,
+    }));
+
     // Update expense with new data
     const updated = await tx.sharedExpense.update({
       where: { id: expenseId },
@@ -304,9 +323,9 @@ export const updateSharedExpense = async (
         categoryId: data.categoryId !== undefined ? data.categoryId : expense.categoryId,
         receiptUrl: data.receiptUrl !== undefined ? data.receiptUrl : expense.receiptUrl,
         splitType: finalSplitType,
-        paidByUserId: data.paidByUserId || expense.paidByUserId,
+        paidByUserId: finalPaidByUserId,
         participants: {
-          create: participantsWithAmounts,
+          create: participantsWithPaymentStatus,
         },
       },
       include: {
@@ -1027,6 +1046,8 @@ export const settleAllBalance = async (
   });
 
   // Mark all participants as paid
+  console.log('🔍 DEBUG settleAllBalance - Found expenses:', expenses.length);
+
   const updatePromises = expenses.flatMap((expense) =>
     expense.participants
       .filter(
@@ -1035,19 +1056,39 @@ export const settleAllBalance = async (
           ((expense.paidByUserId === userId && p.userId === otherUserId) ||
             (expense.paidByUserId === otherUserId && p.userId === userId))
       )
-      .map((p) =>
-        prisma.expenseParticipant.update({
+      .map((p) => {
+        console.log(`🔍 DEBUG settleAllBalance - Marking participant ${p.id} as paid for expense ${expense.id}`);
+        return prisma.expenseParticipant.update({
           where: { id: p.id },
           data: {
             isPaid: true,
             paidDate: new Date(),
             paidAmount: p.amountOwed,
           },
-        })
-      )
+        });
+      })
   );
 
-  await Promise.all(updatePromises);
+  console.log('🔍 DEBUG settleAllBalance - Update promises:', updatePromises.length);
+  const updatedParticipants = await Promise.all(updatePromises);
+  console.log('🔍 DEBUG settleAllBalance - Updated participants:', updatedParticipants.length);
+
+  // Verify the updates by querying the database
+  const verifyParticipants = await prisma.expenseParticipant.findMany({
+    where: {
+      id: {
+        in: updatedParticipants.map(p => p.id)
+      }
+    },
+    select: {
+      id: true,
+      userId: true,
+      isPaid: true,
+      paidDate: true,
+      expenseId: true,
+    }
+  });
+  console.log('🔍 DEBUG settleAllBalance - Verification from DB:', JSON.stringify(verifyParticipants, null, 2));
 
   // Transaction creation logic
   let transactionsCreated = false;

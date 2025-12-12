@@ -231,3 +231,71 @@ export const getMonthlySavings = async (
     next(error);
   }
 };
+
+export const getExpensesByTag = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const now = new Date();
+    const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
+    const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
+
+    const data = await dashboardService.getExpensesByTag(userId, month, year);
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getTopTags = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const now = new Date();
+    const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
+    const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
+    const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+
+    const data = await dashboardService.getTopTags(userId, month, year, limit);
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getTagTrend = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.userId;
+    const months = req.query.months ? parseInt(req.query.months as string) : 6;
+    const tagIds = req.query.tagIds ?
+      (Array.isArray(req.query.tagIds) ? req.query.tagIds : [req.query.tagIds]) as string[] :
+      undefined;
+
+    const data = await dashboardService.getTagTrend(userId, months, tagIds);
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

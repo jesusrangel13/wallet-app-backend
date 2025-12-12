@@ -78,11 +78,19 @@ export const getAccounts = async (
   const skip = calculateSkip(page, limit);
 
   // Get total count for pagination metadata
-  const total = await prisma.account.count({ where: { userId } });
+  const total = await prisma.account.count({
+    where: {
+      userId,
+      isArchived: false
+    }
+  });
 
   // Get paginated accounts
   const accounts = await prisma.account.findMany({
-    where: { userId },
+    where: {
+      userId,
+      isArchived: false
+    },
     orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
     skip,
     take: limit,

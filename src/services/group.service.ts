@@ -5,6 +5,27 @@ import { PaginationParams, calculatePagination, calculateSkip } from '../@types/
 
 const prisma = new PrismaClient();
 
+// Helper function to transform group data with expense counts
+function transformGroupWithCounts(group: any) {
+  if (!group) return group;
+
+  const pendingExpensesCount = group.sharedExpenses
+    ? group.sharedExpenses.filter((expense: any) =>
+        expense.participants.some((p: any) => !p.isPaid)
+      ).length
+    : 0;
+
+  const { sharedExpenses, ...groupWithoutExpenses } = group;
+
+  return {
+    ...groupWithoutExpenses,
+    _count: {
+      expenses: group._count?.sharedExpenses || 0,
+      pendingExpenses: pendingExpensesCount,
+    },
+  };
+}
+
 interface CreateGroupData {
   name: string;
   description?: string;
@@ -57,6 +78,16 @@ export const createGroup = async (userId: string, data: CreateGroupData) => {
       _count: {
         select: {
           sharedExpenses: true,
+        },
+      },
+      sharedExpenses: {
+        select: {
+          id: true,
+          participants: {
+            select: {
+              isPaid: true,
+            },
+          },
         },
       },
     },
@@ -184,11 +215,23 @@ export const createGroup = async (userId: string, data: CreateGroupData) => {
           sharedExpenses: true,
         },
       },
+      sharedExpenses: {
+        select: {
+          id: true,
+          participants: {
+            select: {
+              isPaid: true,
+            },
+          },
+        },
+      },
     },
   });
 
+  const transformedGroup = transformGroupWithCounts(updatedGroup);
+
   return {
-    ...updatedGroup,
+    ...transformedGroup,
     memberAddResults: addedMembers.length > 0 ? addedMembers : undefined,
   };
 };
@@ -233,14 +276,26 @@ export const getGroups = async (userId: string, pagination?: PaginationParams) =
             sharedExpenses: true,
           },
         },
+        sharedExpenses: {
+          select: {
+            id: true,
+            participants: {
+              select: {
+                isPaid: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
       skip,
       take: limit,
     });
 
+    const transformedGroups = groups.map(transformGroupWithCounts);
+
     return {
-      data: groups,
+      data: transformedGroups,
       pagination: calculatePagination(page, limit, total),
     };
   }
@@ -267,11 +322,21 @@ export const getGroups = async (userId: string, pagination?: PaginationParams) =
           sharedExpenses: true,
         },
       },
+      sharedExpenses: {
+        select: {
+          id: true,
+          participants: {
+            select: {
+              isPaid: true,
+            },
+          },
+        },
+      },
     },
     orderBy: { createdAt: 'desc' },
   });
 
-  return groups;
+  return groups.map(transformGroupWithCounts);
 };
 
 export const getGroupById = async (userId: string, groupId: string) => {
@@ -665,8 +730,18 @@ export const updateDefaultSplit = async (
           sharedExpenses: true,
         },
       },
+      sharedExpenses: {
+        select: {
+          id: true,
+          participants: {
+            select: {
+              isPaid: true,
+            },
+          },
+        },
+      },
     },
   });
 
-  return updatedGroup;
+  return transformGroupWithCounts(updatedGroup);
 };

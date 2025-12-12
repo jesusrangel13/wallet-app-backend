@@ -21,4 +21,9 @@ router.get('/personal-expenses', dashboardController.getPersonalExpenses);
 router.get('/shared-expenses', dashboardController.getSharedExpensesTotal);
 router.get('/savings', dashboardController.getMonthlySavings);
 
+// Tag-based analytics endpoints
+router.get('/expenses-by-tag', dashboardController.getExpensesByTag);
+router.get('/top-tags', dashboardController.getTopTags);
+router.get('/tag-trend', dashboardController.getTagTrend);
+
 export default router;

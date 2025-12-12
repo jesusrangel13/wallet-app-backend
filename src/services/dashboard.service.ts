@@ -595,3 +595,305 @@ export const getMonthlySavings = async (userId: string, month?: number, year?: n
     month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
   };
 };
+
+/**
+ * Get expenses grouped by tag for a specific month
+ * Returns distribution of expenses across different tags
+ */
+export const getExpensesByTag = async (userId: string, month?: number, year?: number) => {
+  const now = new Date();
+  const targetMonth = month !== undefined ? month : now.getMonth();
+  const targetYear = year !== undefined ? year : now.getFullYear();
+  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
+  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
+
+  // Get all expenses with their tags for the month
+  const expenses = await prisma.transaction.findMany({
+    where: {
+      userId,
+      type: 'EXPENSE',
+      date: {
+        gte: firstDayOfMonth,
+        lte: lastDayOfMonth,
+      },
+    },
+    include: {
+      tags: {
+        include: {
+          tag: true,
+        },
+      },
+    },
+  });
+
+  // Group by tag
+  const tagData: Record<string, { amount: number; color: string | null; transactionCount: number }> = {};
+  let totalExpenses = 0;
+  let expensesWithTags = 0;
+
+  expenses.forEach((expense) => {
+    const amount = Number(expense.amount);
+
+    if (expense.tags.length > 0) {
+      expensesWithTags += amount;
+      expense.tags.forEach((transactionTag) => {
+        const tag = transactionTag.tag;
+        const tagName = tag.name;
+
+        if (!tagData[tagName]) {
+          tagData[tagName] = {
+            amount: 0,
+            color: tag.color,
+            transactionCount: 0,
+          };
+        }
+
+        tagData[tagName].amount += amount;
+        tagData[tagName].transactionCount += 1;
+      });
+    }
+
+    totalExpenses += amount;
+  });
+
+  // Convert to array with percentages, sorted by amount descending
+  const result = Object.entries(tagData)
+    .map(([tagName, data]) => ({
+      tagName,
+      tagColor: data.color,
+      totalAmount: data.amount,
+      percentage: expensesWithTags > 0 ? (data.amount / expensesWithTags) * 100 : 0,
+      transactionCount: data.transactionCount,
+    }))
+    .sort((a, b) => b.totalAmount - a.totalAmount);
+
+  return result;
+};
+
+/**
+ * Get top tags by usage for a specific month
+ * Returns tags ordered by total amount spent, with statistics
+ */
+export const getTopTags = async (userId: string, month?: number, year?: number, limit: number = 10) => {
+  const now = new Date();
+  const targetMonth = month !== undefined ? month : now.getMonth();
+  const targetYear = year !== undefined ? year : now.getFullYear();
+  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
+  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
+
+  // Get all transactions with tags for the month
+  const transactionsWithTags = await prisma.transactionTag.findMany({
+    where: {
+      transaction: {
+        userId,
+        date: {
+          gte: firstDayOfMonth,
+          lte: lastDayOfMonth,
+        },
+      },
+    },
+    include: {
+      tag: true,
+      transaction: {
+        select: {
+          amount: true,
+          type: true,
+        },
+      },
+    },
+  });
+
+  // Group by tag and calculate statistics
+  const tagStats: Record<string, {
+    tagId: string;
+    tagName: string;
+    tagColor: string | null;
+    amounts: number[];
+    types: string[];
+  }> = {};
+
+  transactionsWithTags.forEach((tt) => {
+    const tagId = tt.tag.id;
+    const tagName = tt.tag.name;
+    const tagColor = tt.tag.color;
+    const amount = Number(tt.transaction.amount);
+    const type = tt.transaction.type;
+
+    if (!tagStats[tagId]) {
+      tagStats[tagId] = {
+        tagId,
+        tagName,
+        tagColor,
+        amounts: [],
+        types: [],
+      };
+    }
+
+    tagStats[tagId].amounts.push(amount);
+    tagStats[tagId].types.push(type);
+  });
+
+  // Calculate final statistics and convert to array
+  const result = Object.entries(tagStats)
+    .map(([tagId, data]) => {
+      const totalAmount = data.amounts.reduce((sum, amount) => sum + amount, 0);
+      const transactionCount = data.amounts.length;
+      const averageAmount = transactionCount > 0 ? totalAmount / transactionCount : 0;
+
+      return {
+        tagId: data.tagId,
+        tagName: data.tagName,
+        tagColor: data.tagColor,
+        transactionCount,
+        totalAmount,
+        averageAmount,
+      };
+    })
+    .sort((a, b) => b.totalAmount - a.totalAmount)
+    .slice(0, limit);
+
+  return result;
+};
+
+/**
+ * Get tag trend over time
+ * Returns monthly spending data for specified tags
+ */
+export const getTagTrend = async (
+  userId: string,
+  months: number = 6,
+  tagIds?: string[]
+) => {
+  const endDate = new Date();
+  const startDate = new Date(endDate);
+  startDate.setMonth(startDate.getMonth() - months);
+
+  // If no specific tags provided, get top 5 tags by amount in the period
+  let targetTagIds = tagIds;
+  if (!targetTagIds || targetTagIds.length === 0) {
+    // Get all transaction tags in the period with their amounts
+    const transactionsInPeriod = await prisma.transactionTag.findMany({
+      where: {
+        transaction: {
+          userId,
+          type: 'EXPENSE',
+          date: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
+      },
+      include: {
+        transaction: {
+          select: {
+            amount: true,
+          },
+        },
+      },
+    });
+
+    // Calculate totals per tag
+    const tagTotals: Record<string, number> = {};
+    transactionsInPeriod.forEach(tt => {
+      if (!tagTotals[tt.tagId]) {
+        tagTotals[tt.tagId] = 0;
+      }
+      tagTotals[tt.tagId] += Number(tt.transaction.amount);
+    });
+
+    // Get top 5 tags by amount
+    targetTagIds = Object.entries(tagTotals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tagId]) => tagId);
+  }
+
+  if (targetTagIds.length === 0) {
+    return [];
+  }
+
+  // Get tag information
+  const tags = await prisma.tag.findMany({
+    where: {
+      id: { in: targetTagIds },
+      userId,
+    },
+    select: {
+      id: true,
+      name: true,
+      color: true,
+    },
+  });
+
+  // Get all transactions with these tags in the period
+  const transactionsWithTags = await prisma.transactionTag.findMany({
+    where: {
+      tagId: { in: targetTagIds },
+      transaction: {
+        userId,
+        type: 'EXPENSE',
+        date: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+    },
+    include: {
+      transaction: {
+        select: {
+          date: true,
+          amount: true,
+        },
+      },
+    },
+  });
+
+  // Group by tag and month
+  const tagMonthlyData: Record<string, Record<string, number>> = {};
+
+  // Initialize structure
+  tags.forEach(tag => {
+    tagMonthlyData[tag.id] = {};
+  });
+
+  // Populate with transaction data
+  transactionsWithTags.forEach(tt => {
+    const monthKey = tt.transaction.date.toISOString().slice(0, 7); // YYYY-MM format
+    const tagId = tt.tagId;
+    const amount = Number(tt.transaction.amount);
+
+    if (!tagMonthlyData[tagId][monthKey]) {
+      tagMonthlyData[tagId][monthKey] = 0;
+    }
+
+    tagMonthlyData[tagId][monthKey] += amount;
+  });
+
+  // Format result
+  const result = tags.map(tag => {
+    const monthlyData = [];
+
+    // Generate data for each month
+    for (let i = 0; i < months; i++) {
+      const currentDate = new Date(startDate);
+      currentDate.setMonth(currentDate.getMonth() + i);
+      const monthKey = currentDate.toISOString().slice(0, 7);
+      const [year, month] = monthKey.split('-');
+
+      monthlyData.push({
+        month: parseInt(month),
+        year: parseInt(year),
+        amount: tagMonthlyData[tag.id][monthKey] || 0,
+      });
+    }
+
+    return {
+      tagId: tag.id,
+      tagName: tag.name,
+      tagColor: tag.color,
+      monthlyData,
+    };
+  });
+
+  return result;
+};

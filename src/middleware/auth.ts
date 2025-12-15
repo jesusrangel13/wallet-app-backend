@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../utils/jwt';
 import { AppError } from './errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 
 export const authenticate = (
   req: Request,
@@ -11,7 +12,7 @@ export const authenticate = (
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new AppError('No token provided', 401);
+      throw new AppError(ErrorCodes.AUTH_NO_TOKEN, 401);
     }
 
     const token = authHeader.substring(7);
@@ -22,6 +23,6 @@ export const authenticate = (
 
     next();
   } catch (error) {
-    next(new AppError('Invalid or expired token', 401));
+    next(new AppError(ErrorCodes.AUTH_INVALID_TOKEN, 401));
   }
 };

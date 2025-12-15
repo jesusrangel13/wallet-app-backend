@@ -1,5 +1,6 @@
 import { PrismaClient, NotificationType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
@@ -100,11 +101,11 @@ export const markAsRead = async (notificationId: string, userId: string) => {
   });
 
   if (!notification) {
-    throw new AppError('Notification not found', 404);
+    throw new AppError(ErrorCodes.NOTIFICATION_NOT_FOUND, 404);
   }
 
   if (notification.userId !== userId) {
-    throw new AppError('Unauthorized to mark this notification as read', 403);
+    throw new AppError(ErrorCodes.NOTIFICATION_UNAUTHORIZED, 403);
   }
 
   const updated = await prisma.notification.update({
@@ -140,11 +141,11 @@ export const deleteNotification = async (notificationId: string, userId: string)
   });
 
   if (!notification) {
-    throw new AppError('Notification not found', 404);
+    throw new AppError(ErrorCodes.NOTIFICATION_NOT_FOUND, 404);
   }
 
   if (notification.userId !== userId) {
-    throw new AppError('Unauthorized to delete this notification', 403);
+    throw new AppError(ErrorCodes.NOTIFICATION_UNAUTHORIZED, 403);
   }
 
   await prisma.notification.delete({

@@ -999,7 +999,7 @@ export const settleAllBalance = async (
   ]);
 
   if (!membership1 || !membership2) {
-    throw new AppError('Both users must be members of the group', 403);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_USERS_NOT_IN_GROUP, 403);
   }
 
   // Calculate current balances

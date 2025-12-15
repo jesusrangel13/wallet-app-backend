@@ -1,11 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
+import { ErrorCodes, type ErrorCode } from '../constants/errorCodes';
 
 export class AppError extends Error {
   statusCode: number;
   isOperational: boolean;
+  errorCode: ErrorCode;
 
-  constructor(message: string, statusCode: number) {
-    super(message);
+  constructor(errorCode: ErrorCode, statusCode: number, message?: string) {
+    super(message || errorCode);
+    this.errorCode = errorCode;
     this.statusCode = statusCode;
     this.isOperational = true;
 
@@ -22,6 +25,7 @@ export const errorHandler = (
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
       status: 'error',
+      errorCode: err.errorCode,
       message: err.message
     });
   }
@@ -31,6 +35,7 @@ export const errorHandler = (
     console.error('Prisma Error:', (err as any).code, (err as any).meta);
     return res.status(400).json({
       status: 'error',
+      errorCode: ErrorCodes.DATABASE_ERROR,
       message: 'Database error occurred'
     });
   }
@@ -39,6 +44,7 @@ export const errorHandler = (
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({
       status: 'error',
+      errorCode: ErrorCodes.AUTH_INVALID_TOKEN,
       message: 'Invalid token'
     });
   }
@@ -46,6 +52,7 @@ export const errorHandler = (
   if (err.name === 'TokenExpiredError') {
     return res.status(401).json({
       status: 'error',
+      errorCode: ErrorCodes.AUTH_TOKEN_EXPIRED,
       message: 'Token expired'
     });
   }
@@ -55,6 +62,7 @@ export const errorHandler = (
 
   res.status(500).json({
     status: 'error',
+    errorCode: ErrorCodes.INTERNAL_SERVER_ERROR,
     message: process.env.NODE_ENV === 'development'
       ? err.message
       : 'Internal server error'

@@ -68,8 +68,15 @@ app.get('/health', (req, res) => {
   });
 });
 
+import { authLimiter, apiLimiter } from './middleware/rateLimiter';
+
 // API Routes
-app.use('/api/auth', authRoutes);
+// Apply auth limiter specifically to auth routes
+app.use('/api/auth', authLimiter, authRoutes);
+
+// Apply general API limiter to all other API routes
+app.use('/api', apiLimiter);
+
 app.use('/api/users', userRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api/transactions', transactionRoutes);

@@ -12,7 +12,7 @@ export const createTransaction = async (
 ) => {
   try {
     const userId = (req as any).user.userId;
-    const validatedData = createTransactionSchema.parse(req.body);
+    const validatedData = req.body;
     const transaction = await transactionService.createTransaction(
       userId,
       validatedData
@@ -100,7 +100,7 @@ export const updateTransaction = async (
   try {
     const userId = (req as any).user.userId;
     const { id } = req.params;
-    const validatedData = updateTransactionSchema.parse(req.body);
+    const validatedData = req.body;
     const transaction = await transactionService.updateTransaction(
       userId,
       id,

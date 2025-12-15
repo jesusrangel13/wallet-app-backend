@@ -1,7 +1,12 @@
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import compression from 'compression';
-import dotenv from 'dotenv';
+import { env } from './config/env';
+import helmet from 'helmet';
+import swaggerUi from 'swagger-ui-express';
+import { specs as swaggerSpecs } from './config/swagger';
+import { requestLogger } from './middleware/requestLogger';
+import healthRoutes from './routes/health.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { notFoundHandler } from './middleware/notFoundHandler';
 
@@ -22,13 +27,15 @@ import dashboardPreferenceRoutes from './routes/dashboardPreference.routes';
 import loanRoutes from './routes/loan.routes';
 import { CategoryTemplateService } from './services/categoryTemplate.service';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables (via env.ts)
 
 const app: Application = express();
-const PORT = process.env.PORT || 5000;
+const PORT = env.PORT;
 
 // Middleware
+app.use(helmet());
+app.use(requestLogger);
+
 // Enable gzip compression for all responses (reduces payload size by ~70%)
 app.use(compression({
   filter: (req: Request, res: Response) => {
@@ -42,7 +49,7 @@ app.use(compression({
   level: 6, // Balance between speed and compression ratio
 }));
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').filter(Boolean) || ['http://localhost:3000'];
+const allowedOrigins = env.ALLOWED_ORIGINS?.split(',').filter(Boolean) || ['http://localhost:3000'];
 app.use(cors({
   origin: (origin, callback) => {
     // Permitir requests sin origin (como Postman o mobile apps)
@@ -60,36 +67,42 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV
-  });
-});
+app.use('/health', healthRoutes);
 
 import { authLimiter, apiLimiter } from './middleware/rateLimiter';
 
 // API Routes
+// Swagger Documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
+
+// API Versioning
+const v1Router = express.Router();
+
 // Apply auth limiter specifically to auth routes
-app.use('/api/auth', authLimiter, authRoutes);
+v1Router.use('/auth', authLimiter, authRoutes);
 
 // Apply general API limiter to all other API routes
-app.use('/api', apiLimiter);
+v1Router.use(apiLimiter);
 
-app.use('/api/users', userRoutes);
-app.use('/api/accounts', accountRoutes);
-app.use('/api/transactions', transactionRoutes);
-app.use('/api/categories', categoryRoutes);
-app.use('/api/tags', tagRoutes);
-app.use('/api/budgets', budgetRoutes);
-app.use('/api/groups', groupRoutes);
-app.use('/api/shared-expenses', sharedExpenseRoutes);
-app.use('/api/loans', loanRoutes);
-app.use('/api/import', importRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/users', dashboardPreferenceRoutes);
+v1Router.use('/users', userRoutes);
+v1Router.use('/accounts', accountRoutes);
+v1Router.use('/transactions', transactionRoutes);
+v1Router.use('/categories', categoryRoutes);
+v1Router.use('/tags', tagRoutes);
+v1Router.use('/budgets', budgetRoutes);
+v1Router.use('/groups', groupRoutes);
+v1Router.use('/shared-expenses', sharedExpenseRoutes);
+v1Router.use('/loans', loanRoutes);
+v1Router.use('/import', importRoutes);
+v1Router.use('/dashboard', dashboardRoutes);
+v1Router.use('/notifications', notificationRoutes);
+v1Router.use('/users', dashboardPreferenceRoutes); // Check if this conflicts with /users above. It seems to be dashboard preferences.
+
+// Mount v1 router
+app.use('/api/v1', v1Router);
+
+// Alias for backward compatibility
+app.use('/api', v1Router);
 
 // Error handling
 app.use(notFoundHandler);
@@ -108,8 +121,9 @@ app.use(errorHandler);
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📝 Environment: ${process.env.NODE_ENV}`);
+  console.log(`📝 Environment: ${env.NODE_ENV}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+  console.log(`📚 API Docs: http://localhost:${PORT}/api-docs`);
 });
 
 export default app;

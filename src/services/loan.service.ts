@@ -1,5 +1,6 @@
 import { PrismaClient, LoanStatus } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import * as transactionService from './transaction.service';
 import { searchCategoriesByName } from './categoryResolver.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
@@ -39,7 +40,7 @@ export const createLoan = async (userId: string, data: CreateLoanData) => {
   });
 
   if (!user) {
-    throw new AppError('User not found', 404);
+    throw new AppError(ErrorCodes.AUTH_USER_NOT_FOUND, 404);
   }
 
   // Validate account exists and belongs to user
@@ -48,7 +49,7 @@ export const createLoan = async (userId: string, data: CreateLoanData) => {
   });
 
   if (!account) {
-    throw new AppError('Account not found or does not belong to user', 404);
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
   }
 
   // If borrowerUserId is provided, validate it exists
@@ -58,7 +59,7 @@ export const createLoan = async (userId: string, data: CreateLoanData) => {
     });
 
     if (!borrower) {
-      throw new AppError('Borrower user not found', 404);
+      throw new AppError(ErrorCodes.AUTH_USER_NOT_FOUND, 404);
     }
   }
 
@@ -236,7 +237,7 @@ export const getLoanById = async (userId: string, loanId: string) => {
   });
 
   if (!loan) {
-    throw new AppError('Loan not found', 404);
+    throw new AppError(ErrorCodes.LOAN_NOT_FOUND, 404);
   }
 
   return loan;
@@ -262,7 +263,7 @@ export const recordLoanPayment = async (
   });
 
   if (!loan) {
-    throw new AppError('Loan not found', 404);
+    throw new AppError(ErrorCodes.LOAN_NOT_FOUND, 404);
   }
 
   // Calculate pending amount
@@ -270,11 +271,11 @@ export const recordLoanPayment = async (
 
   // Validate payment amount
   if (data.amount <= 0) {
-    throw new AppError('Payment amount must be positive', 400);
+    throw new AppError(ErrorCodes.LOAN_INVALID_AMOUNT, 400);
   }
 
   if (data.amount > pendingAmount) {
-    throw new AppError(`Payment amount cannot exceed pending amount of ${pendingAmount}`, 400);
+    throw new AppError(ErrorCodes.LOAN_PAYMENT_EXCEEDS_REMAINING, 400);
   }
 
   // Validate account exists and belongs to user
@@ -283,7 +284,7 @@ export const recordLoanPayment = async (
   });
 
   if (!account) {
-    throw new AppError('Account not found or does not belong to user', 404);
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
   }
 
   // Find "Cobro de préstamo" category
@@ -363,11 +364,11 @@ export const cancelLoan = async (userId: string, loanId: string) => {
   });
 
   if (!loan) {
-    throw new AppError('Loan not found', 404);
+    throw new AppError(ErrorCodes.LOAN_NOT_FOUND, 404);
   }
 
   if (loan.status === 'CANCELLED') {
-    throw new AppError('Loan is already cancelled', 400);
+    throw new AppError(ErrorCodes.LOAN_ALREADY_PAID, 400);
   }
 
   const updatedLoan = await prisma.loan.update({
@@ -400,11 +401,11 @@ export const deleteLoan = async (userId: string, loanId: string) => {
   });
 
   if (!loan) {
-    throw new AppError('Loan not found', 404);
+    throw new AppError(ErrorCodes.LOAN_NOT_FOUND, 404);
   }
 
   if (loan.payments.length > 0) {
-    throw new AppError('Cannot delete loan with payments. Cancel it instead.', 400);
+    throw new AppError(ErrorCodes.LOAN_UNAUTHORIZED, 400);
   }
 
   // Use database transaction

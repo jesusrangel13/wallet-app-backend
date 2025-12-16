@@ -8,6 +8,7 @@ import { Request, Response, NextFunction } from 'express';
 import { CategoryTemplateService } from '../services/categoryTemplate.service';
 import { UserCategoryService } from '../services/userCategory.service';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import { TransactionType } from '@prisma/client';
 
 // Extend Express Request to include user ID from auth middleware
@@ -72,7 +73,7 @@ export const getUserCategories = async (
 ) => {
   try {
     if (!req.user?.userId) {
-      throw new AppError('User not authenticated', 401);
+      throw new AppError(ErrorCodes.UNAUTHORIZED, 401);
     }
 
     const categories = await UserCategoryService.getUserCategoriesHierarchy(req.user.userId);
@@ -97,17 +98,17 @@ export const createCategoryOverride = async (
 ) => {
   try {
     if (!req.user?.userId) {
-      throw new AppError('User not authenticated', 401);
+      throw new AppError(ErrorCodes.UNAUTHORIZED, 401);
     }
 
     const { templateId, name, icon, color } = req.body;
 
     if (!templateId) {
-      throw new AppError('templateId is required', 400);
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, 400);
     }
 
     if (!name) {
-      throw new AppError('name is required', 400);
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, 400);
     }
 
     const override = await UserCategoryService.overrideTemplateCategory(
@@ -137,7 +138,7 @@ export const getCategoryOverride = async (
 ) => {
   try {
     if (!req.user?.userId) {
-      throw new AppError('User not authenticated', 401);
+      throw new AppError(ErrorCodes.UNAUTHORIZED, 401);
     }
 
     const { id } = req.params;
@@ -163,14 +164,14 @@ export const updateCategoryOverride = async (
 ) => {
   try {
     if (!req.user?.userId) {
-      throw new AppError('User not authenticated', 401);
+      throw new AppError(ErrorCodes.UNAUTHORIZED, 401);
     }
 
     const { id } = req.params;
     const { name, icon, color } = req.body;
 
     if (!name && !icon && !color) {
-      throw new AppError('At least one field (name, icon, color) is required', 400);
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, 400);
     }
 
     const updated = await UserCategoryService.updateCustomCategory(
@@ -200,7 +201,7 @@ export const deleteCategoryOverride = async (
 ) => {
   try {
     if (!req.user?.userId) {
-      throw new AppError('User not authenticated', 401);
+      throw new AppError(ErrorCodes.UNAUTHORIZED, 401);
     }
 
     const { id } = req.params;
@@ -209,7 +210,7 @@ export const deleteCategoryOverride = async (
     const category = await UserCategoryService.getUserCategory(req.user.userId, id);
 
     if (!category) {
-      throw new AppError('Category not found', 404);
+      throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
     }
 
     if (category.templateId) {
@@ -243,17 +244,17 @@ export const createCustomCategory = async (
 ) => {
   try {
     if (!req.user?.userId) {
-      throw new AppError('User not authenticated', 401);
+      throw new AppError(ErrorCodes.UNAUTHORIZED, 401);
     }
 
     const { name, icon, color, type, parentId } = req.body;
 
     if (!name) {
-      throw new AppError('name is required', 400);
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, 400);
     }
 
     if (!type || !['EXPENSE', 'INCOME', 'TRANSFER'].includes(type)) {
-      throw new AppError('type is required and must be EXPENSE, INCOME, or TRANSFER', 400);
+      throw new AppError(ErrorCodes.VALIDATION_ERROR, 400);
     }
 
     const customCategory = await UserCategoryService.createCustomCategory(
@@ -282,7 +283,7 @@ export const getUserCustomCategories = async (
 ) => {
   try {
     if (!req.user?.userId) {
-      throw new AppError('User not authenticated', 401);
+      throw new AppError(ErrorCodes.UNAUTHORIZED, 401);
     }
 
     const customCategories = await UserCategoryService.getUserCategoriesFlat(

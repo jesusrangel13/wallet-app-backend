@@ -1,5 +1,6 @@
 import { PrismaClient, TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import { DEFAULT_CATEGORY_TEMPLATES } from '../data/categoryTemplates';
 
 const prisma = new PrismaClient();
@@ -86,7 +87,7 @@ export class CategoryTemplateService {
       console.log(`✓ Successfully initialized ${templatesByName.size} category templates`);
     } catch (error) {
       console.error('Error initializing default templates:', error);
-      throw new AppError('Failed to initialize category templates', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -118,7 +119,7 @@ export class CategoryTemplateService {
       return hierarchical;
     } catch (error) {
       console.error('Error fetching template hierarchy:', error);
-      throw new AppError('Failed to fetch category templates', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -144,7 +145,7 @@ export class CategoryTemplateService {
       return templates.map(t => this.mapToHierarchy(t));
     } catch (error) {
       console.error(`Error fetching templates for type ${type}:`, error);
-      throw new AppError('Failed to fetch category templates', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -167,7 +168,7 @@ export class CategoryTemplateService {
       return this.mapToHierarchy(template);
     } catch (error) {
       console.error(`Error fetching template ${id}:`, error);
-      throw new AppError('Failed to fetch category template', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -198,7 +199,7 @@ export class CategoryTemplateService {
       });
     } catch (error) {
       console.error('Error fetching all templates:', error);
-      throw new AppError('Failed to fetch category templates', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 

@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import { PaginationParams, calculatePagination, calculateSkip, PaginatedResponse } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
@@ -23,7 +24,7 @@ export const createBudget = async (userId: string, data: CreateBudgetData) => {
   });
 
   if (existingBudget) {
-    throw new AppError('Budget already exists for this period', 400);
+    throw new AppError(ErrorCodes.BUDGET_ALREADY_EXISTS, 400);
   }
 
   const budget = await prisma.budget.create({
@@ -77,7 +78,7 @@ export const getBudgetById = async (userId: string, budgetId: string) => {
   });
 
   if (!budget) {
-    throw new AppError('Budget not found', 404);
+    throw new AppError(ErrorCodes.BUDGET_NOT_FOUND, 404);
   }
 
   return budget;
@@ -93,7 +94,7 @@ export const updateBudget = async (
   });
 
   if (!existingBudget) {
-    throw new AppError('Budget not found', 404);
+    throw new AppError(ErrorCodes.BUDGET_NOT_FOUND, 404);
   }
 
   const budget = await prisma.budget.update({
@@ -110,7 +111,7 @@ export const deleteBudget = async (userId: string, budgetId: string) => {
   });
 
   if (!existingBudget) {
-    throw new AppError('Budget not found', 404);
+    throw new AppError(ErrorCodes.BUDGET_NOT_FOUND, 404);
   }
 
   await prisma.budget.delete({

@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import { PaginationParams, calculatePagination, calculateSkip, PaginatedResponse } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
@@ -24,7 +25,7 @@ export const createTag = async (userId: string, data: CreateTagData) => {
   });
 
   if (existing) {
-    throw new AppError('Tag with this name already exists', 400);
+    throw new AppError(ErrorCodes.TAG_ALREADY_EXISTS, 400);
   }
 
   const tag = await prisma.tag.create({
@@ -70,7 +71,7 @@ export const getTagById = async (userId: string, id: string) => {
   });
 
   if (!tag) {
-    throw new AppError('Tag not found', 404);
+    throw new AppError(ErrorCodes.TAG_NOT_FOUND, 404);
   }
 
   return tag;
@@ -87,7 +88,7 @@ export const updateTag = async (
   });
 
   if (!existing) {
-    throw new AppError('Tag not found', 404);
+    throw new AppError(ErrorCodes.TAG_NOT_FOUND, 404);
   }
 
   // If name is being updated, check it doesn't conflict
@@ -101,7 +102,7 @@ export const updateTag = async (
     });
 
     if (nameExists) {
-      throw new AppError('Tag with this name already exists', 400);
+      throw new AppError(ErrorCodes.TAG_ALREADY_EXISTS, 400);
     }
   }
 
@@ -123,7 +124,7 @@ export const deleteTag = async (userId: string, id: string) => {
   });
 
   if (!existing) {
-    throw new AppError('Tag not found', 404);
+    throw new AppError(ErrorCodes.TAG_NOT_FOUND, 404);
   }
 
   // Delete all transaction-tag relations first

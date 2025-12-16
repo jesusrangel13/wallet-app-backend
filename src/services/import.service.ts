@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import { resolveCategoriesBatch } from './categoryResolver.service';
 import { createTransaction } from './transaction.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
@@ -52,7 +53,7 @@ export const importTransactions = async (
   });
 
   if (!account) {
-    throw new AppError('Account not found', 404);
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
   }
 
   // Create import history record with PROCESSING status
@@ -433,7 +434,7 @@ export const getImportHistoryById = async (userId: string, importId: string) => 
   });
 
   if (!importHistory) {
-    throw new AppError('Import history not found', 404);
+    throw new AppError(ErrorCodes.IMPORT_NOT_FOUND, 404);
   }
 
   // Resolve categoryIds to CategoryInfo for display

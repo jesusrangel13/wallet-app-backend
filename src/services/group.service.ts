@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import * as notificationService from './notification.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 
@@ -390,7 +391,7 @@ export const getGroupById = async (userId: string, groupId: string) => {
   });
 
   if (!group) {
-    throw new AppError('Group not found or you are not a member', 404);
+    throw new AppError(ErrorCodes.GROUP_NOT_FOUND, 404);
   }
 
   return group;
@@ -410,7 +411,7 @@ export const updateGroup = async (
   });
 
   if (!group) {
-    throw new AppError('Group not found or you are not the creator', 403);
+    throw new AppError(ErrorCodes.GROUP_UNAUTHORIZED, 403);
   }
 
   const updatedGroup = await prisma.group.update({
@@ -445,7 +446,7 @@ export const deleteGroup = async (userId: string, groupId: string) => {
   });
 
   if (!group) {
-    throw new AppError('Group not found or you are not the creator', 403);
+    throw new AppError(ErrorCodes.GROUP_UNAUTHORIZED, 403);
   }
 
   // Check if there are unsettled expenses
@@ -454,10 +455,7 @@ export const deleteGroup = async (userId: string, groupId: string) => {
   });
 
   if (unsettledExpenses > 0) {
-    throw new AppError(
-      'Cannot delete group with unsettled expenses. Please settle all expenses first.',
-      400
-    );
+    throw new AppError(ErrorCodes.BAD_REQUEST, 400);
   }
 
   await prisma.group.delete({
@@ -481,7 +479,7 @@ export const addMember = async (
   });
 
   if (!membership) {
-    throw new AppError('You are not a member of this group', 403);
+    throw new AppError(ErrorCodes.GROUP_NOT_MEMBER, 403);
   }
 
   // Find user by email
@@ -490,7 +488,7 @@ export const addMember = async (
   });
 
   if (!newMember) {
-    throw new AppError('User not found with this email', 404);
+    throw new AppError(ErrorCodes.AUTH_USER_NOT_FOUND, 404);
   }
 
   // Check if user is already a member
@@ -502,7 +500,7 @@ export const addMember = async (
   });
 
   if (existingMembership) {
-    throw new AppError('User is already a member of this group', 400);
+    throw new AppError(ErrorCodes.GROUP_ALREADY_MEMBER, 400);
   }
 
   // Add member
@@ -554,7 +552,7 @@ export const removeMember = async (
   });
 
   if (!group && userId !== memberId) {
-    throw new AppError('Only the creator can remove other members', 403);
+    throw new AppError(ErrorCodes.GROUP_UNAUTHORIZED, 403);
   }
 
   // Check if member has unsettled debts
@@ -571,10 +569,7 @@ export const removeMember = async (
   });
 
   if (unsettledDebts > 0) {
-    throw new AppError(
-      'Cannot remove member with unsettled debts. Please settle all debts first.',
-      400
-    );
+    throw new AppError(ErrorCodes.BAD_REQUEST, 400);
   }
 
   await prisma.groupMember.delete({
@@ -596,7 +591,7 @@ export const getGroupBalances = async (userId: string, groupId: string) => {
   });
 
   if (!membership) {
-    throw new AppError('You are not a member of this group', 403);
+    throw new AppError(ErrorCodes.GROUP_NOT_MEMBER, 403);
   }
 
   // Get all expenses in the group
@@ -679,7 +674,7 @@ export const updateDefaultSplit = async (
   });
 
   if (!membership) {
-    throw new AppError('You are not a member of this group', 403);
+    throw new AppError(ErrorCodes.GROUP_NOT_MEMBER, 403);
   }
 
   // Update group with default split type

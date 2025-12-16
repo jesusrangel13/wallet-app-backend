@@ -1,5 +1,6 @@
 import { PrismaClient, TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import { UserCategoryService } from './userCategory.service';
 import {
   resolveCategoryById,
@@ -105,31 +106,31 @@ export const createTransaction = async (
 
   // Validate results
   if (!account) {
-    throw new AppError('Account not found', 404);
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
   }
 
   if (data.categoryId && !categoryInfo) {
     console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
-    throw new AppError('Category not found', 404);
+    throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
   }
 
   if (data.type === 'TRANSFER') {
     if (!data.toAccountId) {
-      throw new AppError('Destination account is required for transfers', 400);
+      throw new AppError(ErrorCodes.TRANSACTION_INVALID_ACCOUNT, 400);
     }
 
     if (!toAccount) {
-      throw new AppError('Destination account not found', 404);
+      throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
     }
 
     // Verify accounts have same currency
     if (account.currency !== toAccount.currency) {
-      throw new AppError('Cannot transfer between accounts with different currencies', 400);
+      throw new AppError(ErrorCodes.TRANSACTION_INVALID_ACCOUNT, 400);
     }
   }
 
   if (data.tags && data.tags.length > 0 && tags.length !== data.tags.length) {
-    throw new AppError('One or more tags not found', 404);
+    throw new AppError(ErrorCodes.TAG_NOT_FOUND, 404);
   }
 
   // OPTIMIZATION: Use database transaction for atomicity and batch balance updates
@@ -216,7 +217,7 @@ async function updateAccountBalance(
   });
 
   if (!account) {
-    throw new AppError('Account not found', 404);
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
   }
 
   let balanceChange = amount;
@@ -427,7 +428,7 @@ export const getTransactionById = async (userId: string, transactionId: string) 
   });
 
   if (!transaction) {
-    throw new AppError('Transaction not found', 404);
+    throw new AppError(ErrorCodes.TRANSACTION_NOT_FOUND, 404);
   }
 
   // Resolve category information
@@ -451,7 +452,7 @@ export const updateTransaction = async (
   });
 
   if (!existingTransaction) {
-    throw new AppError('Transaction not found', 404);
+    throw new AppError(ErrorCodes.TRANSACTION_NOT_FOUND, 404);
   }
 
   // If account is changing, verify new account
@@ -461,7 +462,7 @@ export const updateTransaction = async (
     });
 
     if (!newAccount) {
-      throw new AppError('New account not found', 404);
+      throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
     }
 
     // Revert balance change on old account
@@ -544,7 +545,7 @@ export const updateTransaction = async (
 
     if (!isValidCategory) {
       console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
-      throw new AppError('Category not found', 404);
+      throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
     }
   }
 
@@ -570,7 +571,7 @@ export const updateTransaction = async (
       });
 
       if (!sharedExpense) {
-        throw new AppError('Shared expense not found or you are not a member', 404);
+        throw new AppError(ErrorCodes.SHARED_EXPENSE_NOT_FOUND, 404);
       }
     }
   }
@@ -584,7 +585,7 @@ export const updateTransaction = async (
       });
 
       if (tags.length !== data.tags.length) {
-        throw new AppError('One or more tags not found', 404);
+        throw new AppError(ErrorCodes.TAG_NOT_FOUND, 404);
       }
     }
 
@@ -651,7 +652,7 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
   });
 
   if (!transaction) {
-    throw new AppError('Transaction not found', 404);
+    throw new AppError(ErrorCodes.TRANSACTION_NOT_FOUND, 404);
   }
 
   // Check if this is a shared expense transaction
@@ -673,7 +674,7 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
     });
 
     if (!sharedExpense) {
-      throw new AppError('Shared expense not found', 404);
+      throw new AppError(ErrorCodes.SHARED_EXPENSE_NOT_FOUND, 404);
     }
 
     // Normalizar IDs para comparación robusta
@@ -700,7 +701,7 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
     // Usamos IDs normalizados para manejar diferencias en mayúsculas/minúsculas o espacios
     if (normalizedPaidByUserId !== normalizedRequestingUserId) {
       throw new AppError(
-        'Solo la persona que pagó puede eliminar este gasto compartido',
+        ErrorCodes.SHARED_EXPENSE_ONLY_PAYER_CAN_DELETE,
         403
       );
     }
@@ -888,7 +889,7 @@ export const bulkDeleteTransactions = async (
   transactionIds: string[]
 ) => {
   if (!transactionIds || transactionIds.length === 0) {
-    throw new AppError('No transaction IDs provided', 400);
+    throw new AppError(ErrorCodes.BAD_REQUEST, 400);
   }
 
   // Verify all transactions belong to the user
@@ -906,7 +907,7 @@ export const bulkDeleteTransactions = async (
   });
 
   if (transactions.length !== transactionIds.length) {
-    throw new AppError('Some transactions not found or do not belong to you', 404);
+    throw new AppError(ErrorCodes.TRANSACTION_NOT_FOUND, 404);
   }
 
   // Delete each transaction individually to properly handle balances and shared expenses

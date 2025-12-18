@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import * as notificationService from './notification.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 
@@ -36,7 +37,7 @@ export const createSharedExpense = async (
   });
 
   if (!membership) {
-    throw new AppError('You are not a member of this group', 403);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_NOT_MEMBER, 403);
   }
 
   // Verify all participants are members
@@ -49,7 +50,7 @@ export const createSharedExpense = async (
   });
 
   if (members.length !== participantIds.length) {
-    throw new AppError('All participants must be members of the group', 400);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_PARTICIPANTS_NOT_MEMBERS, 400);
   }
 
   // Calculate amounts based on split type
@@ -67,7 +68,7 @@ export const createSharedExpense = async (
       0
     );
     if (Math.abs(totalPercentage - 100) > 0.01) {
-      throw new AppError('Percentages must add up to 100', 400);
+      throw new AppError(ErrorCodes.SHARED_EXPENSE_PERCENTAGE_INVALID, 400);
     }
     participantsWithAmounts = data.participants.map((p) => ({
       userId: p.userId,
@@ -79,7 +80,7 @@ export const createSharedExpense = async (
       0
     );
     if (Math.abs(totalAmount - data.amount) > 0.01) {
-      throw new AppError('Exact amounts must add up to total amount', 400);
+      throw new AppError(ErrorCodes.SHARED_EXPENSE_EXACT_AMOUNT_INVALID, 400);
     }
     participantsWithAmounts = data.participants.map((p) => ({
       userId: p.userId,
@@ -219,12 +220,12 @@ export const updateSharedExpense = async (
   });
 
   if (!expense) {
-    throw new AppError('Expense not found or you are not a member', 404);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_NOT_FOUND, 404);
   }
 
   // Only the person who paid can update the expense
   if (expense.paidByUserId !== userId) {
-    throw new AppError('Only the person who paid can update the expense', 403);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_ONLY_PAYER_CAN_UPDATE, 403);
   }
 
   // If participants are being updated, verify all are members
@@ -238,7 +239,7 @@ export const updateSharedExpense = async (
     });
 
     if (members.length !== participantIds.length) {
-      throw new AppError('All participants must be members of the group', 400);
+      throw new AppError(ErrorCodes.SHARED_EXPENSE_PARTICIPANTS_NOT_MEMBERS, 400);
     }
   }
 
@@ -267,7 +268,7 @@ export const updateSharedExpense = async (
       0
     );
     if (Math.abs(totalPercentage - 100) > 0.01) {
-      throw new AppError('Percentages must add up to 100', 400);
+      throw new AppError(ErrorCodes.SHARED_EXPENSE_PERCENTAGE_INVALID, 400);
     }
     participantsWithAmounts = finalParticipants.map((p) => ({
       userId: p.userId,
@@ -279,7 +280,7 @@ export const updateSharedExpense = async (
       0
     );
     if (Math.abs(totalAmount - finalAmount) > 0.01) {
-      throw new AppError('Exact amounts must add up to total amount', 400);
+      throw new AppError(ErrorCodes.SHARED_EXPENSE_EXACT_AMOUNT_INVALID, 400);
     }
     participantsWithAmounts = finalParticipants.map((p) => ({
       userId: p.userId,
@@ -490,7 +491,7 @@ export const getSharedExpenseById = async (userId: string, expenseId: string) =>
   });
 
   if (!expense) {
-    throw new AppError('Expense not found or you are not a member', 404);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_NOT_FOUND, 404);
   }
 
   return expense;
@@ -505,7 +506,7 @@ export const deleteSharedExpense = async (userId: string, expenseId: string) => 
   });
 
   if (!expense) {
-    throw new AppError('Expense not found or you are not the payer', 403);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_ONLY_PAYER_CAN_DELETE, 403);
   }
 
   await prisma.sharedExpense.delete({
@@ -528,7 +529,7 @@ export const settlePayment = async (
   ]);
 
   if (!fromUser || !toUser) {
-    throw new AppError('User not found', 404);
+    throw new AppError(ErrorCodes.AUTH_USER_NOT_FOUND, 404);
   }
 
   // If groupId is provided, verify both are members
@@ -543,7 +544,7 @@ export const settlePayment = async (
     ]);
 
     if (!fromMembership || !toMembership) {
-      throw new AppError('Both users must be members of the group', 400);
+      throw new AppError(ErrorCodes.SHARED_EXPENSE_USERS_NOT_IN_GROUP, 400);
     }
   }
 
@@ -640,7 +641,7 @@ export const calculateSimplifiedDebts = async (userId: string, groupId: string) 
   });
 
   if (!membership) {
-    throw new AppError('You are not a member of this group', 403);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_NOT_MEMBER, 403);
   }
 
   // Get all group members
@@ -751,7 +752,7 @@ export const markParticipantAsPaid = async (
   });
 
   if (!expense) {
-    throw new AppError('Expense not found or you are not a member', 404);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_NOT_FOUND, 404);
   }
 
   // Only the person who paid or the person who owes can mark as paid
@@ -759,7 +760,7 @@ export const markParticipantAsPaid = async (
   const isDebtor = participantUserId === userId;
 
   if (!isPayee && !isDebtor) {
-    throw new AppError('You can only mark payments you paid for or payments you owe', 403);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_INVALID_PAYMENT_PERMISSION, 403);
   }
 
   // Find the participant
@@ -768,7 +769,7 @@ export const markParticipantAsPaid = async (
   );
 
   if (!participant) {
-    throw new AppError('Participant not found in this expense', 404);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_PARTICIPANT_NOT_FOUND, 404);
   }
 
   // Update participant payment status
@@ -939,12 +940,12 @@ export const markParticipantAsUnpaid = async (
   });
 
   if (!expense) {
-    throw new AppError('Expense not found or you are not a member', 404);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_NOT_FOUND, 404);
   }
 
   // Only the person who paid can mark as unpaid
   if (expense.paidByUserId !== userId) {
-    throw new AppError('Only the person who paid can undo a payment', 403);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_ONLY_PAYER_CAN_UNDO, 403);
   }
 
   // Find the participant
@@ -953,7 +954,7 @@ export const markParticipantAsUnpaid = async (
   );
 
   if (!participant) {
-    throw new AppError('Participant not found in this expense', 404);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_PARTICIPANT_NOT_FOUND, 404);
   }
 
   // Update participant payment status
@@ -998,7 +999,7 @@ export const settleAllBalance = async (
   ]);
 
   if (!membership1 || !membership2) {
-    throw new AppError('Both users must be members of the group', 403);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_USERS_NOT_IN_GROUP, 403);
   }
 
   // Calculate current balances
@@ -1012,7 +1013,7 @@ export const settleAllBalance = async (
   );
 
   if (!debtBetweenUsers) {
-    throw new AppError('No balance to settle between these users', 400);
+    throw new AppError(ErrorCodes.SHARED_EXPENSE_NO_BALANCE, 400);
   }
 
   // Get all unpaid expenses between these users

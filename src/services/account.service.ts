@@ -1,5 +1,6 @@
 import { PrismaClient, AccountType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import { PaginationParams, calculatePagination, calculateSkip, PaginatedResponse } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
@@ -108,7 +109,7 @@ export const getAccountById = async (userId: string, accountId: string) => {
   });
 
   if (!account) {
-    throw new AppError('Account not found', 404);
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
   }
 
   return account;
@@ -125,7 +126,7 @@ export const updateAccount = async (
   });
 
   if (!existingAccount) {
-    throw new AppError('Account not found', 404);
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
   }
 
   // If setting as default, unset other defaults
@@ -161,7 +162,7 @@ export const deleteAccount = async (
   });
 
   if (!existingAccount) {
-    throw new AppError('Account not found', 404);
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
   }
 
   // Check if account has transactions
@@ -185,11 +186,11 @@ export const deleteAccount = async (
     });
 
     if (!targetAccount) {
-      throw new AppError('Target account not found', 404);
+      throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
     }
 
     if (transferToAccountId === accountId) {
-      throw new AppError('Cannot transfer transactions to the same account', 400);
+      throw new AppError(ErrorCodes.TRANSACTION_SAME_ACCOUNT_TRANSFER, 400);
     }
 
     // Transfer all transactions to the target account
@@ -225,7 +226,7 @@ export const getAccountBalance = async (userId: string, accountId: string) => {
   });
 
   if (!account) {
-    throw new AppError('Account not found', 404);
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
   }
 
   return account;
@@ -265,7 +266,7 @@ export const getAccountBalanceHistory = async (
   });
 
   if (!account) {
-    throw new AppError('Account not found', 404);
+    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
   }
 
   // Use current month/year if not provided

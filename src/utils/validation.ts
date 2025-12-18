@@ -7,6 +7,7 @@ export const registerSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   currency: z.enum(['CLP', 'USD', 'EUR']).optional().default('CLP'),
   country: z.string().optional(),
+  language: z.enum(['es', 'en', 'fr', 'pt', 'it', 'de']).optional().default('es'),
 });
 
 export const loginSchema = z.object({

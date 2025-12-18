@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { hashPassword } from '../utils/password';
+import { ErrorCodes } from '../constants/errorCodes';
 
 const prisma = new PrismaClient();
 
@@ -9,6 +10,7 @@ interface UpdateUserData {
   avatarUrl?: string;
   currency?: string;
   country?: string;
+  language?: string;
 }
 
 interface UpdatePasswordData {
@@ -26,6 +28,7 @@ export const getProfile = async (userId: string) => {
       avatarUrl: true,
       currency: true,
       country: true,
+      language: true,
       isVerified: true,
       defaultSharedExpenseAccountId: true,
       defaultSharedExpenseAccount: {
@@ -43,7 +46,7 @@ export const getProfile = async (userId: string) => {
   });
 
   if (!user) {
-    throw new AppError('User not found', 404);
+    throw new AppError(ErrorCodes.AUTH_USER_NOT_FOUND, 404);
   }
 
   return user;
@@ -60,6 +63,7 @@ export const updateProfile = async (userId: string, data: UpdateUserData) => {
       avatarUrl: true,
       currency: true,
       country: true,
+      language: true,
       isVerified: true,
       createdAt: true,
       updatedAt: true,
@@ -107,7 +111,7 @@ export const updateDefaultSharedExpenseAccount = async (
 
     if (!account) {
       throw new AppError(
-        'Account not found or does not belong to user',
+        ErrorCodes.ACCOUNT_NOT_FOUND,
         404
       );
     }
@@ -123,6 +127,7 @@ export const updateDefaultSharedExpenseAccount = async (
       avatarUrl: true,
       currency: true,
       country: true,
+      language: true,
       isVerified: true,
       defaultSharedExpenseAccountId: true,
       defaultSharedExpenseAccount: {

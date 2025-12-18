@@ -1,5 +1,6 @@
 import { PrismaClient, TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 import { CategoryTemplateService } from './categoryTemplate.service';
 
 const prisma = new PrismaClient();
@@ -67,7 +68,7 @@ export class UserCategoryService {
       return [...mergedTemplates, ...customCategories];
     } catch (error) {
       console.error(`Error fetching user categories for ${userId}:`, error);
-      throw new AppError('Failed to fetch user categories', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -81,7 +82,7 @@ export class UserCategoryService {
       return allCategories.filter(cat => cat.type === type);
     } catch (error) {
       console.error(`Error fetching user categories for type ${type}:`, error);
-      throw new AppError('Failed to fetch user categories', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -135,7 +136,7 @@ export class UserCategoryService {
       return null;
     } catch (error) {
       console.error(`Error fetching category ${categoryId}:`, error);
-      throw new AppError('Failed to fetch category', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -170,7 +171,7 @@ export class UserCategoryService {
       return flat;
     } catch (error) {
       console.error(`Error fetching flat categories for ${userId}:`, error);
-      throw new AppError('Failed to fetch categories', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -210,7 +211,7 @@ export class UserCategoryService {
       });
 
       if (existing) {
-        throw new AppError('Category with this name already exists', 400);
+        throw new AppError(ErrorCodes.CATEGORY_ALREADY_EXISTS, 400);
       }
 
       return await prisma.userCategoryOverride.create({
@@ -228,10 +229,10 @@ export class UserCategoryService {
     } catch (error: any) {
       if (error instanceof AppError) throw error;
       if (error.code === 'P2002') {
-        throw new AppError('Category with this name already exists', 400);
+        throw new AppError(ErrorCodes.CATEGORY_ALREADY_EXISTS, 400);
       }
       console.error(`Error creating custom category for ${userId}:`, error);
-      throw new AppError('Failed to create category', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -254,11 +255,11 @@ export class UserCategoryService {
       });
 
       if (!category || category.userId !== userId) {
-        throw new AppError('Category not found', 404);
+        throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
       }
 
       if (!category.isCustom) {
-        throw new AppError('Can only edit custom categories', 400);
+        throw new AppError(ErrorCodes.BAD_REQUEST, 400);
       }
 
       return await prisma.userCategoryOverride.update({
@@ -272,7 +273,7 @@ export class UserCategoryService {
     } catch (error: any) {
       if (error instanceof AppError) throw error;
       console.error(`Error updating category ${categoryId}:`, error);
-      throw new AppError('Failed to update category', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -291,11 +292,11 @@ export class UserCategoryService {
 
       // Si no existe override, crear uno para desactivar el template
       if (!override) {
-        throw new AppError('Category not found', 404);
+        throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
       }
 
       if (override.userId !== userId) {
-        throw new AppError('Unauthorized', 403);
+        throw new AppError(ErrorCodes.UNAUTHORIZED, 403);
       }
 
       return await prisma.userCategoryOverride.update({
@@ -305,7 +306,7 @@ export class UserCategoryService {
     } catch (error: any) {
       if (error instanceof AppError) throw error;
       console.error(`Error toggling category ${categoryId}:`, error);
-      throw new AppError('Failed to update category', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -325,7 +326,7 @@ export class UserCategoryService {
       // Verificar que el template existe
       const template = await CategoryTemplateService.getTemplateById(templateId);
       if (!template) {
-        throw new AppError('Template not found', 404);
+        throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
       }
 
       // Buscar o crear override
@@ -366,7 +367,7 @@ export class UserCategoryService {
     } catch (error: any) {
       if (error instanceof AppError) throw error;
       console.error(`Error overriding template ${templateId}:`, error);
-      throw new AppError('Failed to override category', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -380,7 +381,7 @@ export class UserCategoryService {
       });
 
       if (!override || override.userId !== userId || !override.templateId) {
-        throw new AppError('Invalid category', 404);
+        throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
       }
 
       // Simplemente eliminar el override
@@ -390,7 +391,7 @@ export class UserCategoryService {
     } catch (error: any) {
       if (error instanceof AppError) throw error;
       console.error(`Error resetting category ${categoryId}:`, error);
-      throw new AppError('Failed to reset category', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -404,11 +405,11 @@ export class UserCategoryService {
       });
 
       if (!category || category.userId !== userId) {
-        throw new AppError('Category not found', 404);
+        throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
       }
 
       if (!category.isCustom) {
-        throw new AppError('Can only delete custom categories. Deactivate templates instead.', 400);
+        throw new AppError(ErrorCodes.BAD_REQUEST, 400);
       }
 
       // Verificar que no hay transacciones usando esta categoría
@@ -420,7 +421,7 @@ export class UserCategoryService {
     } catch (error: any) {
       if (error instanceof AppError) throw error;
       console.error(`Error deleting category ${categoryId}:`, error);
-      throw new AppError('Failed to delete category', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 
@@ -450,7 +451,7 @@ export class UserCategoryService {
       if (customParent) {
         // Es una categoría custom del usuario
         if (customParent.userId !== userId) {
-          throw new AppError('Unauthorized', 403);
+          throw new AppError(ErrorCodes.UNAUTHORIZED, 403);
         }
         parentOverride = customParent;
         parentType = customParent.type || ('EXPENSE' as TransactionType);
@@ -459,7 +460,7 @@ export class UserCategoryService {
         const templateParent = await CategoryTemplateService.getTemplateById(parentId);
 
         if (!templateParent) {
-          throw new AppError('Parent category not found', 404);
+          throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
         }
 
         // Es un template - crear un override automáticamente para usarlo como padre
@@ -496,7 +497,7 @@ export class UserCategoryService {
       const childType = data.type || parentType;
 
       if (childType !== parentType) {
-        throw new AppError('Subcategory must be same type as parent', 400);
+        throw new AppError(ErrorCodes.BAD_REQUEST, 400);
       }
 
       // Validar nombre único dentro del parent
@@ -509,7 +510,7 @@ export class UserCategoryService {
       });
 
       if (existing) {
-        throw new AppError('Subcategory with this name already exists in this category', 400);
+        throw new AppError(ErrorCodes.CATEGORY_ALREADY_EXISTS, 400);
       }
 
       return await prisma.userCategoryOverride.create({
@@ -528,7 +529,7 @@ export class UserCategoryService {
     } catch (error: any) {
       if (error instanceof AppError) throw error;
       console.error(`Error creating custom subcategory for ${userId}:`, error);
-      throw new AppError('Failed to create subcategory', 500);
+      throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
 

@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { hashPassword, comparePassword } from '../utils/password';
 import { generateToken } from '../utils/jwt';
 import { AppError } from '../middleware/errorHandler';
+import { ErrorCodes } from '../constants/errorCodes';
 
 const prisma = new PrismaClient();
 
@@ -11,6 +12,7 @@ interface RegisterData {
   name: string;
   currency?: string;
   country?: string;
+  language?: string;
 }
 
 interface LoginData {
@@ -25,7 +27,7 @@ export const register = async (data: RegisterData) => {
   });
 
   if (existingUser) {
-    throw new AppError('User with this email already exists', 400);
+    throw new AppError(ErrorCodes.AUTH_USER_EXISTS, 400);
   }
 
   // Hash password
@@ -39,6 +41,7 @@ export const register = async (data: RegisterData) => {
       name: data.name,
       currency: data.currency || 'USD',
       country: data.country,
+      language: data.language || 'es',
     },
     select: {
       id: true,
@@ -46,6 +49,7 @@ export const register = async (data: RegisterData) => {
       name: true,
       currency: true,
       country: true,
+      language: true,
       createdAt: true,
     },
   });
@@ -66,14 +70,14 @@ export const login = async (data: LoginData) => {
   });
 
   if (!user) {
-    throw new AppError('Invalid email or password', 401);
+    throw new AppError(ErrorCodes.AUTH_INVALID_CREDENTIALS, 401);
   }
 
   // Verify password
   const isValidPassword = await comparePassword(data.password, user.passwordHash);
 
   if (!isValidPassword) {
-    throw new AppError('Invalid email or password', 401);
+    throw new AppError(ErrorCodes.AUTH_INVALID_CREDENTIALS, 401);
   }
 
   // Generate token
@@ -95,6 +99,7 @@ export const getProfile = async (userId: string) => {
       avatarUrl: true,
       currency: true,
       country: true,
+      language: true,
       isVerified: true,
       createdAt: true,
       updatedAt: true,
@@ -102,7 +107,7 @@ export const getProfile = async (userId: string) => {
   });
 
   if (!user) {
-    throw new AppError('User not found', 404);
+    throw new AppError(ErrorCodes.AUTH_USER_NOT_FOUND, 404);
   }
 
   return user;

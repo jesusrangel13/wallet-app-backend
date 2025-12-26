@@ -25,7 +25,9 @@ import dashboardRoutes from './routes/dashboard.routes';
 import notificationRoutes from './routes/notification.routes';
 import dashboardPreferenceRoutes from './routes/dashboardPreference.routes';
 import loanRoutes from './routes/loan.routes';
+import investmentRoutes from './routes/investment.routes';
 import { CategoryTemplateService } from './services/categoryTemplate.service';
+import { startInvestmentCronJobs } from './cron/investment-cron';
 
 // Load environment variables (via env.ts)
 
@@ -93,6 +95,7 @@ v1Router.use('/budgets', budgetRoutes);
 v1Router.use('/groups', groupRoutes);
 v1Router.use('/shared-expenses', sharedExpenseRoutes);
 v1Router.use('/loans', loanRoutes);
+v1Router.use('/investments', investmentRoutes);
 v1Router.use('/import', importRoutes);
 v1Router.use('/dashboard', dashboardRoutes);
 v1Router.use('/notifications', notificationRoutes);
@@ -117,6 +120,9 @@ app.use(errorHandler);
     // Don't block server startup if this fails
   }
 })();
+
+// Start investment cron jobs
+startInvestmentCronJobs();
 
 // Start server
 app.listen(PORT, () => {

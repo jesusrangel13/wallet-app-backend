@@ -151,3 +151,24 @@ export const createPaymentSchema = z.object({
   amount: z.number().positive('Amount must be positive'),
   groupId: z.string().uuid().optional(),
 });
+
+// Investment schemas
+export const createInvestmentTransactionSchema = z.object({
+  accountId: z.string().uuid('Invalid account ID'),
+  assetSymbol: z.string().min(1).max(20).transform((val) => val.toUpperCase()),
+  assetName: z.string().min(1).max(100),
+  assetType: z.enum(['CRYPTO', 'STOCK', 'ETF', 'FOREX']),
+  type: z.enum(['BUY', 'SELL']),
+  quantity: z.number().positive('Quantity must be positive'),
+  pricePerUnit: z.number().positive('Price per unit must be positive'),
+  fees: z.number().min(0, 'Fees cannot be negative').optional().default(0),
+  currency: z.enum(['USD', 'EUR', 'CLP']).optional().default('USD'),
+  transactionDate: z.string().datetime().optional(),
+  notes: z.string().max(500).optional(),
+  exchangeRate: z.number().positive().optional(),
+});
+
+export const searchAssetsSchema = z.object({
+  query: z.string().min(1, 'Search query is required'),
+  assetType: z.enum(['CRYPTO', 'STOCK', 'ETF', 'FOREX']).optional(),
+});

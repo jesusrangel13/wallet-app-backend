@@ -239,7 +239,7 @@ export const getTotalBalance = async (userId: string) => {
     select: { balance: true, currency: true },
   });
 
-  // Group by currency
+  // Group account balances by currency
   const balanceByCurrency = accounts.reduce((acc, account) => {
     if (!acc[account.currency]) {
       acc[account.currency] = 0;
@@ -247,6 +247,23 @@ export const getTotalBalance = async (userId: string) => {
     acc[account.currency] += Number(account.balance);
     return acc;
   }, {} as Record<string, number>);
+
+  // Add holdings value to the total balance
+  try {
+    const { investmentHoldingService } = await import('./investment-holding.service');
+    const holdingsValue = await investmentHoldingService.getTotalHoldingsValue(userId);
+
+    // Merge holdings value with account balances
+    for (const [currency, value] of Object.entries(holdingsValue)) {
+      if (!balanceByCurrency[currency]) {
+        balanceByCurrency[currency] = 0;
+      }
+      balanceByCurrency[currency] += value;
+    }
+  } catch (error) {
+    // Si el servicio de inversiones no existe o falla, continuar sin holdings
+    console.warn('Could not load holdings value:', error);
+  }
 
   return balanceByCurrency;
 };

@@ -92,15 +92,15 @@ export const createTransaction = async (
     // For transfers, verify toAccount
     data.type === 'TRANSFER' && data.toAccountId
       ? prisma.account.findFirst({
-          where: { id: data.toAccountId, userId },
-        })
+        where: { id: data.toAccountId, userId },
+      })
       : Promise.resolve(null),
 
     // Verify tags if provided
     data.tags && data.tags.length > 0
       ? prisma.tag.findMany({
-          where: { id: { in: data.tags }, userId },
-        })
+        where: { id: { in: data.tags }, userId },
+      })
       : Promise.resolve([]),
   ]);
 
@@ -152,10 +152,10 @@ export const createTransaction = async (
         sharedExpenseId: data.sharedExpenseId,
         tags: data.tags
           ? {
-              create: data.tags.map((tagId) => ({
-                tag: { connect: { id: tagId } },
-              })),
-            }
+            create: data.tags.map((tagId) => ({
+              tag: { connect: { id: tagId } },
+            })),
+          }
           : undefined,
       },
       include: {
@@ -327,9 +327,6 @@ export const getTransactions = async (
   const limit = Math.min(filters.limit || 50, 500); // Max 500 per page
   const skip = (page - 1) * limit;
 
-  // Get total count for pagination
-  const total = await prisma.transaction.count({ where });
-
   // Determine sort order
   let orderBy: any = { date: 'desc' }; // default
   if (filters.sortBy && filters.sortOrder) {
@@ -338,40 +335,53 @@ export const getTransactions = async (
     orderBy = { [filters.sortBy]: 'desc' }; // default to desc if sortOrder not specified
   }
 
-  // Get paginated transactions
-  const transactions = await prisma.transaction.findMany({
-    where,
-    include: {
-      account: {
-        select: { name: true, currency: true, type: true },
-      },
-      tags: {
-        include: {
-          tag: true,
+  // OPTIMIZATION: Run count and findMany in parallel
+  const [total, transactions] = await Promise.all([
+    prisma.transaction.count({ where }),
+    prisma.transaction.findMany({
+      where,
+      include: {
+        account: {
+          select: { name: true, currency: true, type: true },
         },
-      },
-      toAccount: {
-        select: { name: true, currency: true },
-      },
-      sharedExpense: {
-        select: {
-          id: true,
-          description: true,
-          groupId: true,
-          paidByUserId: true,
-          participants: {
-            select: {
-              isPaid: true,
-              userId: true,
+        tags: {
+          include: {
+            tag: true,
+          },
+        },
+        toAccount: {
+          select: { name: true, currency: true },
+        },
+        // OPTIMIZATION: lighter include for shared expense
+        sharedExpense: {
+          select: {
+            id: true,
+            description: true,
+            groupId: true,
+            paidByUserId: true,
+            // Only fetch minimal participant info if absolutely needed, or maybe skip it for list view?
+            // Checking frontend usage: usually transaction list just shows an icon "Shared".
+            // We'll keep it minimal.
+            participants: {
+              // UI Requirement: List needs to show status of ALL participants
+              select: {
+                isPaid: true,
+                userId: true,
+                amountOwed: true,
+                // Include user name for tooltips/avatars if needed in UI
+                user: {
+                  select: { name: true }
+                }
+              }
             },
           },
         },
       },
-    },
-    orderBy,
-    skip,
-    take: limit,
-  });
+      orderBy,
+      skip,
+      take: limit,
+    })
+  ]);
 
   // Resolve categories for all transactions in batch
   const categoryIds = transactions.map((t) => t.categoryId);

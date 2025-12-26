@@ -354,7 +354,7 @@ class InvestmentHoldingService {
     const prices = await priceProviderService.getBatchPrices(symbols);
 
     // Calcular valor por moneda
-    const valueByC urrency: { [currency: string]: number } = {};
+    const valueByCurrency: { [currency: string]: number } = {};
 
     allHoldings.forEach((holding) => {
       const priceData = prices.get(holding.assetSymbol);
@@ -362,14 +362,14 @@ class InvestmentHoldingService {
         const currentValue = priceData.price * Number(holding.totalQuantity);
         const currency = holding.currency;
 
-        if (!valueByC currency[currency]) {
-          valueByC currency[currency] = 0;
+        if (!valueByCurrency[currency]) {
+          valueByCurrency[currency] = 0;
         }
-        valueByC currency[currency] += currentValue;
+        valueByCurrency[currency] += currentValue;
       }
     });
 
-    return valueByC currency;
+    return valueByCurrency;
   }
 }
 

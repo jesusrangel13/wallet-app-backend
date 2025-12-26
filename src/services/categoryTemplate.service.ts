@@ -95,11 +95,23 @@ export class CategoryTemplateService {
    * Obtiene todos los templates organizados jerárquicamente
    * Utiliza cache para optimizar
    */
+  // Simple in-memory cache
+  private static templatesCache: { data: CategoryTemplateHierarchy[]; timestamp: number } | null = null;
+  private static readonly CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+  /**
+   * Obtiene todos los templates organizados jerárquicamente
+   * Utiliza cache para optimizar
+   */
   static async getAllTemplatesHierarchy(): Promise<CategoryTemplateHierarchy[]> {
     try {
-      // TODO: Implementar cache con Redis cuando esté disponible
-      // const cached = await redis.get(CACHE_KEY);
-      // if (cached) return JSON.parse(cached);
+      // Check cache
+      if (
+        this.templatesCache &&
+        Date.now() - this.templatesCache.timestamp < this.CACHE_TTL_MS
+      ) {
+        return this.templatesCache.data;
+      }
 
       const templates = await prisma.categoryTemplate.findMany({
         where: { parentTemplateId: null },
@@ -113,8 +125,11 @@ export class CategoryTemplateService {
 
       const hierarchical = templates.map(t => this.mapToHierarchy(t));
 
-      // TODO: Cachear resultado
-      // await redis.setex(CACHE_KEY, CACHE_TTL, JSON.stringify(hierarchical));
+      // Set cache
+      this.templatesCache = {
+        data: hierarchical,
+        timestamp: Date.now(),
+      };
 
       return hierarchical;
     } catch (error) {

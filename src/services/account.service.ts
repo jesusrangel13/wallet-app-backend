@@ -78,24 +78,21 @@ export const getAccounts = async (
   const limit = Math.min(pagination?.limit || 50, 200); // Default 50, max 200
   const skip = calculateSkip(page, limit);
 
-  // Get total count for pagination metadata
-  const total = await prisma.account.count({
-    where: {
-      userId,
-      isArchived: false
-    }
-  });
+  const where = {
+    userId,
+    isArchived: false
+  };
 
-  // Get paginated accounts
-  const accounts = await prisma.account.findMany({
-    where: {
-      userId,
-      isArchived: false
-    },
-    orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
-    skip,
-    take: limit,
-  });
+  // OPTIMIZATION: Run count and findMany in parallel
+  const [total, accounts] = await Promise.all([
+    prisma.account.count({ where }),
+    prisma.account.findMany({
+      where,
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+      skip,
+      take: limit,
+    })
+  ]);
 
   return {
     data: accounts,
@@ -279,12 +276,14 @@ export const getAccountBalanceHistory = async (
   const endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59); // Last day of month
   const daysInMonth = endDate.getDate();
 
-  // Get transactions for this account in the date range
+  // Optimized approach: Start from current balance (`account.balance`) and calculate backwards
+  // logic requires fetching all transactions from startDate to NOW (descending)
+
   const transactions = await prisma.transaction.findMany({
     where: {
       OR: [
-        { accountId, date: { gte: startDate, lte: endDate } },
-        { toAccountId: accountId, date: { gte: startDate, lte: endDate } },
+        { accountId, date: { gte: startDate } },
+        { toAccountId: accountId, date: { gte: startDate } },
       ],
     },
     select: {
@@ -294,207 +293,146 @@ export const getAccountBalanceHistory = async (
       accountId: true,
       toAccountId: true,
     },
-    orderBy: { date: 'asc' },
+    orderBy: { date: 'desc' }, // Descending for backward calculation
   });
 
-  // Calculate initial balance (transactions before start date)
-  const initialBalanceData = await prisma.transaction.groupBy({
-    by: ['type'],
-    where: {
-      OR: [
-        { accountId, date: { lt: startDate } },
-        { toAccountId: accountId, type: 'TRANSFER', date: { lt: startDate } },
-      ],
-    },
-    _sum: { amount: true },
-  });
-
-  // Also need to account for transfers separately
-  const initialTransferIn = await prisma.transaction.aggregate({
-    where: {
-      toAccountId: accountId,
-      type: 'TRANSFER',
-      date: { lt: startDate },
-    },
-    _sum: { amount: true },
-  });
-
-  const initialTransferOut = await prisma.transaction.aggregate({
-    where: {
-      accountId,
-      type: 'TRANSFER',
-      date: { lt: startDate },
-    },
-    _sum: { amount: true },
-  });
-
-  let initialBalance = Number(account.balance); // Start with current balance
-
-  // Calculate what to subtract from current balance to get initial balance
-  let futureChanges = 0;
-
-  // Sum all transactions from start date to now
-  const futureTransactions = await prisma.transaction.findMany({
-    where: {
-      OR: [
-        { accountId, date: { gte: startDate } },
-        { toAccountId: accountId, date: { gte: startDate } },
-      ],
-    },
-    select: {
-      type: true,
-      amount: true,
-      accountId: true,
-      toAccountId: true,
-    },
-  });
-
+  // Start with current balance
+  // Note: account.balance is Decimal, convert to Number
+  let runningBalance = Number(account.balance);
   const isCreditCard = account.type === 'CREDIT';
 
-  futureTransactions.forEach((tx) => {
+  // We need to calculate daily balances for the target month [1..daysInMonth]
+  // The transactions array includes transactions from NOW down to startDate
+
+  // Strategy:
+  // 1. Walk backward from NOW to endDate of target month (unwind future transactions)
+  // 2. Walk backward from endDate to startDate (record daily balances)
+
+  const dailyBalances: Array<{ date: string; balance: number }> = [];
+
+  // Helper to reverse effect of a transaction
+  const reverseTransaction = (tx: any, currentBal: number): number => {
     const amount = Number(tx.amount);
+    let newBal = currentBal;
 
     if (isCreditCard) {
-      // For credit cards: balance = available credit (limit - spent)
-      // EXPENSE reduces available credit (subtract from balance)
-      // INCOME/PAYMENT increases available credit (add to balance)
+      // Credit Card: Balance = Available Credit
+      // INCOME (Payment) increases available -> Reverse: Subtract
+      // EXPENSE decreases available -> Reverse: Add
+      // TRANSFER OUT (like expense) -> Reverse: Add
+      // TRANSFER IN (like payment) -> Reverse: Subtract
+
       if (tx.type === 'INCOME' && tx.accountId === accountId) {
-        futureChanges += amount; // Payment increases available credit
+        newBal -= amount;
       } else if (tx.type === 'EXPENSE' && tx.accountId === accountId) {
-        futureChanges -= amount; // Spending reduces available credit
+        newBal += amount;
       } else if (tx.type === 'TRANSFER') {
         if (tx.accountId === accountId) {
-          futureChanges -= amount; // Money out reduces available credit
+          newBal += amount; // Was subtracted, so add back
         }
         if (tx.toAccountId === accountId) {
-          futureChanges += amount; // Money in increases available credit
+          newBal -= amount; // Was added, so subtract
         }
       }
     } else {
-      // For normal accounts: standard balance calculation
+      // Normal Account: Balance = Asset
+      // INCOME increases -> Reverse: Subtract
+      // EXPENSE decreases -> Reverse: Add
+      // TRANSFER OUT decreases -> Reverse: Add
+      // TRANSFER IN increases -> Reverse: Subtract
+
       if (tx.type === 'INCOME' && tx.accountId === accountId) {
-        futureChanges += amount;
+        newBal -= amount;
       } else if (tx.type === 'EXPENSE' && tx.accountId === accountId) {
-        futureChanges -= amount;
+        newBal += amount;
       } else if (tx.type === 'TRANSFER') {
         if (tx.accountId === accountId) {
-          futureChanges -= amount; // Money out
+          newBal += amount;
         }
         if (tx.toAccountId === accountId) {
-          futureChanges += amount; // Money in
+          newBal -= amount;
         }
       }
     }
-  });
+    return newBal;
+  };
 
-  initialBalance = initialBalance - futureChanges;
-
-  // Calculate daily balances
-  const dailyBalances: Array<{ date: string; balance: number }> = [];
-  let currentBalance = initialBalance;
-
-  // Group transactions by day
+  // Map transactions by day string YYYY-MM-DD
   const transactionsByDay: Record<string, typeof transactions> = {};
   transactions.forEach((tx) => {
     const dayKey = tx.date.toISOString().slice(0, 10);
-    if (!transactionsByDay[dayKey]) {
-      transactionsByDay[dayKey] = [];
-    }
+    if (!transactionsByDay[dayKey]) transactionsByDay[dayKey] = [];
     transactionsByDay[dayKey].push(tx);
   });
 
-  // Generate data for each day in the month
-  for (let day = 1; day <= daysInMonth; day++) {
-    const currentDate = new Date(targetYear, targetMonth - 1, day);
-    const dayKey = currentDate.toISOString().slice(0, 10);
+  // Loop backwards day by day from NOW back to startDate
+  const processDate = new Date();
+  processDate.setHours(23, 59, 59, 999);
 
-    // Apply transactions for this day
-    if (transactionsByDay[dayKey]) {
-      transactionsByDay[dayKey].forEach((tx) => {
-        const amount = Number(tx.amount);
+  // Safe limit
+  const processStartDate = new Date(startDate);
 
-        if (isCreditCard) {
-          // For credit cards: balance = available credit
-          if (tx.type === 'INCOME' && tx.accountId === accountId) {
-            currentBalance += amount; // Payment increases available credit
-          } else if (tx.type === 'EXPENSE' && tx.accountId === accountId) {
-            currentBalance -= amount; // Spending reduces available credit
-          } else if (tx.type === 'TRANSFER') {
-            if (tx.accountId === accountId) {
-              currentBalance -= amount; // Money leaving reduces available credit
-            }
-            if (tx.toAccountId === accountId) {
-              currentBalance += amount; // Money coming in increases available credit
-            }
-          }
-        } else {
-          // For normal accounts: standard balance calculation
-          if (tx.type === 'INCOME' && tx.accountId === accountId) {
-            currentBalance += amount;
-          } else if (tx.type === 'EXPENSE' && tx.accountId === accountId) {
-            currentBalance -= amount;
-          } else if (tx.type === 'TRANSFER') {
-            if (tx.accountId === accountId) {
-              currentBalance -= amount; // Money leaving this account
-            }
-            if (tx.toAccountId === accountId) {
-              currentBalance += amount; // Money coming into this account
-            }
-          }
-        }
+  // Determine range strings for comparison
+  const endDateStr = endDate.toISOString().slice(0, 10);
+  const startDateStr = startDate.toISOString().slice(0, 10);
+
+  // If we are currently in a future month relative to target, or current date > endDate
+  // we just walk back until we hit endDate.
+
+  // If target month is current month, endDate is end of month (future), so loop starts from today.
+
+  while (processDate >= startDate) {
+    const dayKey = processDate.toISOString().slice(0, 10);
+
+    // If this day is within our target month, record the balance (which is end-of-day balance)
+    if (dayKey <= endDateStr && dayKey >= startDateStr) {
+      dailyBalances.push({
+        date: dayKey,
+        balance: Math.round(runningBalance * 100) / 100, // Round to 2 decimals
       });
     }
 
-    dailyBalances.push({
-      date: dayKey,
-      balance: Math.round(currentBalance * 100) / 100, // Round to 2 decimals
-    });
+    // Unwind transactions of this day to get start-of-day balance (which is end-of-prev-day balance)
+    if (transactionsByDay[dayKey]) {
+      // Process in reverse order? Transaction.findMany is 'desc' by date.
+      // So index 0 is latest time.
+      // If we are moving backwards in time, we process latest transactions first.
+      // Yes, correct.
+      transactionsByDay[dayKey].forEach((tx) => {
+        runningBalance = reverseTransaction(tx, runningBalance);
+      });
+    }
+
+    // Move to previous day
+    processDate.setDate(processDate.getDate() - 1);
   }
 
-  // Calculate previous month balance for comparison
-  const previousMonth = targetMonth === 1 ? 12 : targetMonth - 1;
-  const previousYear = targetMonth === 1 ? targetYear - 1 : targetYear;
-  const previousMonthEnd = new Date(previousYear, previousMonth, 0); // Last day of previous month
+  // Ensure we have data points for every day in the month even if 'now' is mid-month?
+  // If target month is a PAST month, 'processDate' starts at 'now' and goes back through everything. 
+  // It handles it correctly.
 
-  const previousBalanceTransactions = await prisma.transaction.findMany({
-    where: {
-      OR: [
-        { accountId, date: { lte: previousMonthEnd } },
-        { toAccountId: accountId, date: { lte: previousMonthEnd } },
-      ],
-    },
-    select: {
-      type: true,
-      amount: true,
-      accountId: true,
-      toAccountId: true,
-    },
-  });
+  // However, if the target month is FUTURE (not allowed usually) or partially future (current month), 
+  // we only have data up to today.
+  // The loop `while (processDate >= startDate)` handles up to today. 
+  // The days AFTER today in the current month are not processed because `processDate` starts at today.
+  // So we won't push entries for future days, which is correct (graph stops at today).
 
-  let previousMonthBalance = initialBalance; // Start from initial balance of current month
+  // BUT if target month is PAST, loop will cover all days.
 
-  // Go back and calculate previous month end balance
-  previousBalanceTransactions.forEach((tx) => {
-    const amount = Number(tx.amount);
-    if (tx.type === 'INCOME' && tx.accountId === accountId) {
-      previousMonthBalance += amount;
-    } else if (tx.type === 'EXPENSE' && tx.accountId === accountId) {
-      previousMonthBalance -= amount;
-    } else if (tx.type === 'TRANSFER') {
-      if (tx.accountId === accountId) {
-        previousMonthBalance -= amount;
-      }
-      if (tx.toAccountId === accountId) {
-        previousMonthBalance += amount;
-      }
-    }
-  });
+  // Problem: If target month is PAST, `processDate` starts at today. 
+  // It unrolls all days from today down to `endDate`. 
+  // When it hits `endDate`, it starts pushing to `dailyBalances`.
 
-  // Actually, let's recalculate this more simply
-  // Previous month balance = initial balance (which is balance at start of current month)
-  previousMonthBalance = initialBalance;
+  // The array `dailyBalances` is in DESC order (latest date first).
+  dailyBalances.reverse();
 
-  const currentMonthEndBalance = dailyBalances[dailyBalances.length - 1]?.balance || initialBalance;
+  // Calculate previous month balance (which is the balance at start of 1st day of this month)
+  // After the loop finishes (processDate < startDate), `runningBalance` holds the balance at End of (startDate - 1 day).
+  // i.e., Start of startDate.
+  const previousMonthBalance = runningBalance;
+
+  const currentMonthEndBalance = dailyBalances[dailyBalances.length - 1]?.balance || previousMonthBalance;
+
   const percentageChange = previousMonthBalance !== 0
     ? ((currentMonthEndBalance - previousMonthBalance) / Math.abs(previousMonthBalance)) * 100
     : 0;

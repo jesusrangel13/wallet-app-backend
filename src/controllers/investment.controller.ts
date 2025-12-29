@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { investmentTransactionService } from '../services/investment-transaction.service';
 import { investmentHoldingService } from '../services/investment-holding.service';
 import { priceProviderService } from '../services/price-provider.service';
+import { investmentImportService } from '../services/investment-import.service';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 
@@ -101,10 +102,12 @@ export const deleteTransaction = async (req: Request, res: Response) => {
 export const getHoldings = async (req: Request, res: Response) => {
   const userId = req.user!.userId;
   const { accountId } = req.params;
+  const status = req.query.status as 'active' | 'closed' | 'all' | undefined;
 
   const holdings = await investmentHoldingService.getHoldingsByAccount(
     userId,
-    accountId
+    accountId,
+    status
   );
 
   res.json({
@@ -146,6 +149,52 @@ export const getPortfolioSummary = async (req: Request, res: Response) => {
   const summary = await investmentHoldingService.calculatePortfolioSummary(
     userId,
     accountId
+  );
+
+  res.json({
+    success: true,
+    data: summary,
+  });
+};
+
+/**
+ * Obtener historial de performance del portafolio
+ */
+export const getPortfolioPerformance = async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { accountId } = req.params;
+  const { period } = req.query;
+
+  const validPeriods = ['1M', '3M', '6M', '1Y', 'ALL'];
+  const selectedPeriod = (period as string) || '1Y';
+
+  if (!validPeriods.includes(selectedPeriod)) {
+    throw new AppError(ErrorCodes.VALIDATION_ERROR, 400);
+  }
+
+  const performance = await investmentHoldingService.getPortfolioPerformanceHistory(
+    userId,
+    accountId,
+    selectedPeriod as '1M' | '3M' | '6M' | '1Y' | 'ALL'
+  );
+
+  res.json({
+    success: true,
+    data: performance,
+  });
+};
+
+/**
+ * Get global portfolio summary across all investment accounts
+ */
+export const getGlobalPortfolioSummary = async (
+  req: Request,
+  res: Response
+) => {
+  const userId = req.user!.userId;
+
+  const summary = await investmentHoldingService.getGlobalPortfolioSummary(
+    userId
   );
 
   res.json({
@@ -213,5 +262,58 @@ export const searchAssets = async (req: Request, res: Response) => {
   res.json({
     success: true,
     data: results,
+  });
+};
+
+/**
+ * Importar transacciones de inversión desde CSV
+ */
+export const importInvestmentTransactions = async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { accountId, fileName, fileType, csvRows } = req.body;
+
+  const result = await investmentImportService.importInvestmentTransactions({
+    userId,
+    accountId,
+    fileName,
+    fileType,
+    csvRows,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+};
+
+/**
+ * Obtener historial de importaciones de inversión
+ */
+export const getInvestmentImportHistory = async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const page = req.query.page ? Number(req.query.page) : undefined;
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+
+  const result = await investmentImportService.getImportHistory(userId, { page, limit });
+
+  res.status(200).json({
+    success: true,
+    data: result.data,
+    pagination: result.pagination,
+  });
+};
+
+/**
+ * Obtener detalle de una importación específica
+ */
+export const getInvestmentImportById = async (req: Request, res: Response) => {
+  const userId = req.user!.userId;
+  const { id } = req.params;
+
+  const importHistory = await investmentImportService.getImportHistoryById(userId, id);
+
+  res.status(200).json({
+    success: true,
+    data: importHistory,
   });
 };

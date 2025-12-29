@@ -14,6 +14,7 @@ interface HoldingWithMetrics extends InvestmentHolding {
   change24h?: number;
   allocation?: number;
   dateSold?: Date; // Solo presente en closed positions
+  dividendsEarned?: number; // Total de dividendos ganados de este activo
 }
 
 interface PortfolioSummary {
@@ -22,6 +23,7 @@ interface PortfolioSummary {
   totalUnrealizedGainLoss: number;
   totalRealizedGainLoss: number;
   totalGainLoss: number;
+  totalDividends: number; // Total de dividendos acumulados en el portafolio
   roi: number;
   currency: string;
   holdings: HoldingWithMetrics[];
@@ -80,6 +82,29 @@ class InvestmentHoldingService {
       return [];
     }
 
+    // Obtener dividendos para todos los holdings en batch
+    const dividendsByAsset = new Map<string, number>();
+
+    if (holdings.length > 0) {
+      const symbols = holdings.map((h) => h.assetSymbol);
+
+      const dividendAggregates = await prisma.investmentTransaction.groupBy({
+        by: ['assetSymbol'],
+        where: {
+          accountId,
+          assetSymbol: { in: symbols },
+          type: { in: ['DIVIDEND', 'INTEREST'] },
+        },
+        _sum: {
+          totalAmount: true,
+        },
+      });
+
+      dividendAggregates.forEach((agg) => {
+        dividendsByAsset.set(agg.assetSymbol, Number(agg._sum.totalAmount || 0));
+      });
+    }
+
     // Obtener precios actuales en batch
     const symbols = holdings.map((h) => ({
       symbol: h.assetSymbol,
@@ -114,6 +139,7 @@ class InvestmentHoldingService {
         unrealizedGainLossPercentage,
         roi,
         change24h: priceData?.change24h,
+        dividendsEarned: dividendsByAsset.get(holding.assetSymbol) || 0,
       };
     });
 
@@ -232,6 +258,7 @@ class InvestmentHoldingService {
         totalUnrealizedGainLoss: 0,
         totalRealizedGainLoss: 0,
         totalGainLoss: 0,
+        totalDividends: 0,
         roi: 0,
         currency: 'USD',
         holdings: [],
@@ -254,6 +281,9 @@ class InvestmentHoldingService {
     );
     const totalGainLoss = totalUnrealizedGainLoss + totalRealizedGainLoss;
     const roi = totalCostBasis > 0 ? (totalGainLoss / totalCostBasis) * 100 : 0;
+
+    // Calcular dividendos totales
+    const totalDividends = await this.aggregateDividends(accountId);
 
     // Calcular asset allocation por tipo
     const assetAllocation: {
@@ -280,6 +310,7 @@ class InvestmentHoldingService {
       totalUnrealizedGainLoss,
       totalRealizedGainLoss,
       totalGainLoss,
+      totalDividends,
       roi,
       currency: holdings[0]?.currency || 'USD',
       holdings,
@@ -833,6 +864,37 @@ class InvestmentHoldingService {
       topPerformer,
       accountBreakdown,
     };
+  }
+
+  /**
+   * Calcula dividendos totales para una cuenta o activo específico
+   * Usa agregación de Prisma para eficiencia O(1)
+   *
+   * @param accountId - ID de la cuenta de inversión
+   * @param assetSymbol - (Opcional) Símbolo del activo para filtrar dividendos específicos
+   * @returns Total de dividendos (suma de totalAmount de transacciones DIVIDEND e INTEREST)
+   */
+  private async aggregateDividends(
+    accountId: string,
+    assetSymbol?: string
+  ): Promise<number> {
+    const whereClause: any = {
+      accountId,
+      type: { in: ['DIVIDEND', 'INTEREST'] },
+    };
+
+    if (assetSymbol) {
+      whereClause.assetSymbol = assetSymbol.toUpperCase();
+    }
+
+    const result = await prisma.investmentTransaction.aggregate({
+      where: whereClause,
+      _sum: {
+        totalAmount: true,
+      },
+    });
+
+    return Number(result._sum.totalAmount || 0);
   }
 }
 

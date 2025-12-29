@@ -152,23 +152,61 @@ export const createPaymentSchema = z.object({
   groupId: z.string().uuid().optional(),
 });
 
-// Investment schemas
-export const createInvestmentTransactionSchema = z.object({
-  accountId: z.string().uuid('Invalid account ID'),
-  assetSymbol: z.string().min(1).max(20).transform((val) => val.toUpperCase()),
-  assetName: z.string().min(1).max(100),
-  assetType: z.enum(['CRYPTO', 'STOCK', 'ETF', 'FOREX']),
-  type: z.enum(['BUY', 'SELL']),
-  quantity: z.number().positive('Quantity must be positive'),
-  pricePerUnit: z.number().positive('Price per unit must be positive'),
-  fees: z.number().min(0, 'Fees cannot be negative').optional().default(0),
-  currency: z.enum(['USD', 'EUR', 'CLP']).optional().default('USD'),
-  transactionDate: z.string().datetime().optional(),
-  notes: z.string().max(500).optional(),
-  exchangeRate: z.number().positive().optional(),
-});
+// Investment schemas - Schema discriminado para soportar BUY/SELL y DIVIDEND/INTEREST
+export const createInvestmentTransactionSchema = z.discriminatedUnion('type', [
+  // Schema para BUY/SELL - requiere quantity y pricePerUnit
+  z.object({
+    accountId: z.string().uuid('Invalid account ID'),
+    assetSymbol: z.string().min(1).max(20).transform((val) => val.toUpperCase()),
+    assetName: z.string().min(1).max(100),
+    assetType: z.enum(['CRYPTO', 'STOCK', 'ETF', 'FOREX']),
+    type: z.enum(['BUY', 'SELL']),
+    quantity: z.number().positive('Quantity must be positive'),
+    pricePerUnit: z.number().positive('Price per unit must be positive'),
+    fees: z.number().min(0, 'Fees cannot be negative').optional().default(0),
+    currency: z.enum(['USD', 'EUR', 'CLP']).optional().default('USD'),
+    transactionDate: z.string().datetime().optional(),
+    notes: z.string().max(500).optional(),
+    exchangeRate: z.number().positive().optional(),
+  }),
+  // Schema para DIVIDEND/INTEREST - requiere amount en lugar de quantity/pricePerUnit
+  z.object({
+    accountId: z.string().uuid('Invalid account ID'),
+    assetSymbol: z.string().min(1).max(20).transform((val) => val.toUpperCase()),
+    assetName: z.string().min(1).max(100),
+    assetType: z.enum(['CRYPTO', 'STOCK', 'ETF', 'FOREX']),
+    type: z.enum(['DIVIDEND', 'INTEREST']),
+    amount: z.number().positive('Amount must be positive'),
+    fees: z.number().min(0, 'Fees cannot be negative').optional().default(0),
+    currency: z.enum(['USD', 'EUR', 'CLP']).optional().default('USD'),
+    transactionDate: z.string().datetime().optional(),
+    notes: z.string().max(500).optional(),
+  }),
+]);
 
 export const searchAssetsSchema = z.object({
   query: z.string().min(1, 'Search query is required'),
   assetType: z.enum(['CRYPTO', 'STOCK', 'ETF', 'FOREX']).optional(),
+});
+
+// Investment Import Schema
+export const importInvestmentTransactionsSchema = z.object({
+  accountId: z.string().uuid('Invalid account ID'),
+  fileName: z.string().min(1, 'File name is required'),
+  fileType: z.enum(['CSV', 'EXCEL']),
+  csvRows: z
+    .array(
+      z.object({
+        'Operation Date': z.string(),
+        'Operation Type': z.string(),
+        'Symbol': z.string().optional().default(''),
+        'Description': z.string(),
+        'Trade Action': z.string().optional().default(''),
+        'Qty': z.string(),
+        'Price': z.string(),
+        'Net amount': z.string(),
+        'Saldo': z.string(),
+      })
+    )
+    .min(1, 'At least one row is required'),
 });

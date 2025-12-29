@@ -10,19 +10,43 @@ import { investmentHoldingService } from './investment-holding.service';
 
 const prisma = new PrismaClient();
 
-interface CreateInvestmentTransactionData {
+// Campos comunes a todos los tipos de transacciones
+interface BaseTransactionData {
   accountId: string;
   assetSymbol: string;
   assetName: string;
   assetType: InvestmentAssetType;
-  type: 'BUY' | 'SELL';
-  quantity: number;
-  pricePerUnit: number;
   fees?: number;
   currency?: string;
   transactionDate?: Date;
   notes?: string;
   exchangeRate?: number;
+}
+
+// Tipo para transacciones BUY/SELL
+interface CreateBuyOrSellData extends BaseTransactionData {
+  type: 'BUY' | 'SELL';
+  quantity: number;
+  pricePerUnit: number;
+}
+
+// Tipo para transacciones DIVIDEND/INTEREST
+interface CreateDividendOrInterestData extends BaseTransactionData {
+  type: 'DIVIDEND' | 'INTEREST';
+  amount: number;
+}
+
+// Union type que puede ser cualquiera de los dos
+type CreateInvestmentTransactionData =
+  | CreateBuyOrSellData
+  | CreateDividendOrInterestData;
+
+// Opciones para optimizar el procesamiento durante imports masivos
+export interface CreateTransactionOptions {
+  skipAccountValidation?: boolean; // Skip account existence validation (already validated)
+  skipBalanceValidation?: boolean; // Skip balance sufficiency validation (validated at end)
+  holdingsCache?: Map<string, any>; // Cache of holdings to avoid repeated queries
+  accumulateBalanceOnly?: boolean; // Don't update balance in DB, only return change
 }
 
 interface TransactionFilters {
@@ -37,56 +61,106 @@ interface TransactionFilters {
 
 class InvestmentTransactionService {
   /**
-   * Crear una nueva transacción (BUY o SELL)
+   * Crear una nueva transacción (BUY, SELL, DIVIDEND o INTEREST)
+   * @param options - Opciones adicionales para la creación de la transacción (para optimización de imports)
+   * @returns Transaction creada y el cambio de balance calculado
    */
   async createTransaction(
     userId: string,
-    data: CreateInvestmentTransactionData
-  ): Promise<InvestmentTransaction> {
-    // Verificar que la cuenta existe, pertenece al usuario y es tipo INVESTMENT
-    const account = await prisma.account.findFirst({
-      where: {
-        id: data.accountId,
-        userId,
-        type: 'INVESTMENT',
-      },
-    });
+    data: CreateInvestmentTransactionData,
+    options?: CreateTransactionOptions
+  ): Promise<{ transaction: InvestmentTransaction; balanceChange: number }> {
+    // Verificar que la cuenta existe solo si no se omite la validación
+    let account: any = null;
+    if (!options?.skipAccountValidation) {
+      account = await prisma.account.findFirst({
+        where: {
+          id: data.accountId,
+          userId,
+          type: 'INVESTMENT',
+        },
+      });
 
-    if (!account) {
-      throw new AppError(ErrorCodes.ENTITY_NOT_FOUND, 404);
+      if (!account) {
+        throw new AppError(ErrorCodes.ENTITY_NOT_FOUND, 404);
+      }
     }
 
     const fees = data.fees || 0;
     const currency = data.currency || 'USD';
-    const totalAmount = data.pricePerUnit * data.quantity;
+
+    // Detectar tipo de transacción
+    const isDividendOrInterest = data.type === 'DIVIDEND' || data.type === 'INTEREST';
     const isBuy = data.type === 'BUY';
 
-    // Validar balance si es una compra
-    if (isBuy) {
+    // Calcular valores según tipo de transacción
+    let totalAmount: number;
+    let quantity: number;
+    let pricePerUnit: number;
+
+    if (isDividendOrInterest) {
+      // Para dividendos/intereses: usar amount directamente
+      totalAmount = (data as CreateDividendOrInterestData).amount;
+      quantity = 0; // No afecta la cantidad del holding
+      pricePerUnit = totalAmount; // Guardamos el monto aquí para registro
+    } else {
+      // Para BUY/SELL: calcular desde quantity * pricePerUnit
+      const buyOrSellData = data as CreateBuyOrSellData;
+      quantity = buyOrSellData.quantity;
+      pricePerUnit = buyOrSellData.pricePerUnit;
+      totalAmount = quantity * pricePerUnit;
+    }
+
+    // Validar balance si es una compra (solo si no se omite la validación)
+    if (isBuy && !options?.skipBalanceValidation) {
       const totalCost = totalAmount + fees;
       if (Number(account.balance) < totalCost) {
-        throw new AppError(ErrorCodes.INSUFFICIENT_BALANCE, 400);
+        throw new AppError(
+          ErrorCodes.INSUFFICIENT_BALANCE,
+          400,
+          `Insufficient funds. Account balance: ${account.balance} ${account.currency}, Required: ${totalCost.toFixed(2)} ${currency}`
+        );
       }
     }
 
     // Usar transacción de Prisma para asegurar atomicidad
     const result = await prisma.$transaction(async (tx) => {
-      // Buscar o crear el holding
-      let holding = await tx.investmentHolding.findUnique({
-        where: {
-          accountId_assetSymbol: {
-            accountId: data.accountId,
-            assetSymbol: data.assetSymbol.toUpperCase(),
+      // Buscar el holding - usar cache si está disponible
+      let holding = options?.holdingsCache?.get(data.assetSymbol.toUpperCase());
+
+      if (!holding) {
+        holding = await tx.investmentHolding.findUnique({
+          where: {
+            accountId_assetSymbol: {
+              accountId: data.accountId,
+              assetSymbol: data.assetSymbol.toUpperCase(),
+            },
           },
-        },
-      });
+        });
+
+        // Agregar al cache si está disponible
+        if (holding && options?.holdingsCache) {
+          options.holdingsCache.set(holding.assetSymbol, holding);
+        }
+      }
+
+      // Para dividendos/intereses: DEBE existir el holding
+      if (isDividendOrInterest) {
+        if (!holding) {
+          throw new AppError(
+            ErrorCodes.ENTITY_NOT_FOUND,
+            404,
+            'Cannot record dividend/interest without an existing holding'
+          );
+        }
+      }
 
       // Si es SELL, validar que existe y tiene suficiente cantidad
-      if (!isBuy) {
+      if (!isBuy && !isDividendOrInterest) {
         if (!holding) {
           throw new AppError(ErrorCodes.ENTITY_NOT_FOUND, 404);
         }
-        if (Number(holding.totalQuantity) < data.quantity) {
+        if (Number(holding.totalQuantity) < quantity) {
           throw new AppError(ErrorCodes.INSUFFICIENT_BALANCE, 400);
         }
       }
@@ -106,6 +180,11 @@ class InvestmentTransactionService {
             currency,
           },
         });
+
+        // Agregar el nuevo holding al cache si está disponible
+        if (options?.holdingsCache) {
+          options.holdingsCache.set(holding.assetSymbol, holding);
+        }
       }
 
       if (!holding) {
@@ -121,8 +200,8 @@ class InvestmentTransactionService {
           assetSymbol: data.assetSymbol.toUpperCase(),
           assetType: data.assetType,
           type: data.type,
-          quantity: data.quantity,
-          pricePerUnit: data.pricePerUnit,
+          quantity,
+          pricePerUnit,
           totalAmount,
           fees,
           currency,
@@ -132,37 +211,50 @@ class InvestmentTransactionService {
         },
       });
 
-      // Actualizar balance de la cuenta
-      const balanceChange = isBuy ? -(totalAmount + fees) : totalAmount - fees;
+      // Calcular cambio de balance
+      let balanceChange: number;
 
-      await tx.account.update({
-        where: { id: data.accountId },
-        data: {
-          balance: {
-            increment: balanceChange,
+      if (isDividendOrInterest) {
+        // Dividendos/intereses son ingresos: incrementar balance
+        balanceChange = totalAmount - fees;
+      } else if (isBuy) {
+        // Compras: decrementar balance
+        balanceChange = -(totalAmount + fees);
+      } else {
+        // Ventas: incrementar balance
+        balanceChange = totalAmount - fees;
+      }
+
+      // Actualizar balance solo si no se está acumulando para batch update
+      if (!options?.accumulateBalanceOnly) {
+        await tx.account.update({
+          where: { id: data.accountId },
+          data: {
+            balance: {
+              increment: balanceChange,
+            },
           },
-        },
-      });
+        });
+      }
 
-      // Actualizar holding (fuera de la transacción de Prisma para usar el servicio)
-      // Lo hacemos después de la transacción
-
-      return transaction;
+      return { transaction, balanceChange };
     });
 
-    // Actualizar holding usando el servicio
-    await investmentHoldingService.updateHoldingAfterTransaction(
-      userId,
-      data.accountId,
-      data.assetSymbol,
-      data.assetName,
-      data.assetType,
-      data.quantity,
-      data.pricePerUnit,
-      fees,
-      currency,
-      isBuy
-    );
+    // Actualizar holding SOLO si es BUY o SELL (no para dividendos/intereses)
+    if (!isDividendOrInterest) {
+      await investmentHoldingService.updateHoldingAfterTransaction(
+        userId,
+        data.accountId,
+        data.assetSymbol,
+        data.assetName,
+        data.assetType,
+        quantity,
+        pricePerUnit,
+        fees,
+        currency,
+        isBuy
+      );
+    }
 
     return result;
   }
@@ -272,12 +364,34 @@ class InvestmentTransactionService {
     // Obtener la transacción
     const transaction = await this.getTransactionById(userId, transactionId);
 
+    const isDividendOrInterest = transaction.type === 'DIVIDEND' || transaction.type === 'INTEREST';
     const isBuy = transaction.type === 'BUY';
     const totalAmount = Number(transaction.totalAmount);
     const fees = Number(transaction.fees);
 
     // Usar transacción de Prisma para asegurar atomicidad
     await prisma.$transaction(async (tx) => {
+      // Para dividendos/intereses: solo revertir el balance
+      if (isDividendOrInterest) {
+        // Revertir balance (decrementar lo que se había incrementado)
+        await tx.account.update({
+          where: { id: transaction.accountId },
+          data: {
+            balance: {
+              decrement: totalAmount - fees,
+            },
+          },
+        });
+
+        // Eliminar la transacción
+        await tx.investmentTransaction.delete({
+          where: { id: transactionId },
+        });
+
+        return; // Salir temprano, no tocar holdings
+      }
+
+      // Para BUY/SELL: revertir efectos en holdings
       // Obtener el holding
       const holding = await tx.investmentHolding.findUnique({
         where: { id: transaction.holdingId },

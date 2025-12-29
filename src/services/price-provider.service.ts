@@ -13,6 +13,26 @@ const CACHE_TTL = {
   FOREX: 60 * 60 * 1000, // 1 hora
 };
 
+// Rate limiting para Alpha Vantage (1 request/segundo)
+const ALPHA_VANTAGE_RATE_LIMIT_MS = 1100; // 1.1 segundos para estar seguros
+let lastAlphaVantageRequest = 0;
+
+/**
+ * Helper para respetar rate limit de Alpha Vantage
+ */
+async function waitForAlphaVantageRateLimit(): Promise<void> {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastAlphaVantageRequest;
+
+  if (timeSinceLastRequest < ALPHA_VANTAGE_RATE_LIMIT_MS) {
+    const delay = ALPHA_VANTAGE_RATE_LIMIT_MS - timeSinceLastRequest;
+    console.log(`⏱️  Rate limiting: waiting ${delay}ms before next Alpha Vantage request`);
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+
+  lastAlphaVantageRequest = Date.now();
+}
+
 interface PriceData {
   price: number;
   change24h?: number;
@@ -57,11 +77,13 @@ class PriceProviderService {
     // Verificar cache primero
     const cached = await this.getPriceFromCache(assetSymbol, assetType);
     if (cached && !cached.isStale) {
+      console.log(`📦 Cache HIT for ${assetSymbol} (fresh, age: ${Math.floor((Date.now() - cached.timestamp.getTime()) / 1000)}s)`);
       return cached;
     }
 
     // Si no hay cache válido, obtener de API
     try {
+      console.log(`🌐 Fetching live price for ${assetSymbol} (${assetType})...`);
       let priceData: PriceData;
 
       switch (assetType) {
@@ -86,7 +108,8 @@ class PriceProviderService {
     } catch (error: any) {
       // Si la API falla, usar cache antiguo si existe
       if (cached) {
-        console.warn(`API failed, using stale cache for ${assetSymbol}`);
+        const age = Math.floor((Date.now() - cached.timestamp.getTime()) / 60000); // minutos
+        console.warn(`⚠️  API failed for ${assetSymbol}, using stale cache (${age}m old)`);
         return cached;
       }
       throw error;
@@ -95,27 +118,62 @@ class PriceProviderService {
 
   /**
    * Obtener múltiples precios en batch
+   * IMPORTANTE: Procesa stocks/ETFs secuencialmente para respetar rate limit de Alpha Vantage
    */
   async getBatchPrices(
     symbols: Array<{ symbol: string; assetType: InvestmentAssetType }>
   ): Promise<Map<string, PriceData>> {
     const results = new Map<string, PriceData>();
 
-    // Procesar en paralelo (máximo 10 a la vez para no saturar)
-    const batchSize = 10;
-    for (let i = 0; i < symbols.length; i += batchSize) {
-      const batch = symbols.slice(i, i + batchSize);
-      const promises = batch.map(async ({ symbol, assetType }) => {
+    // Separar por tipo de activo
+    const stocksAndETFs = symbols.filter(s => s.assetType === 'STOCK' || s.assetType === 'ETF');
+    const others = symbols.filter(s => s.assetType !== 'STOCK' && s.assetType !== 'ETF');
+
+    // Procesar stocks/ETFs SECUENCIALMENTE (1 por segundo por Alpha Vantage)
+    if (stocksAndETFs.length > 0) {
+      console.log(`📊 Fetching ${stocksAndETFs.length} stocks/ETFs sequentially (rate limited)...`);
+      for (const { symbol, assetType } of stocksAndETFs) {
         try {
           const price = await this.getCurrentPrice(symbol, assetType);
           results.set(symbol, price);
-        } catch (error) {
-          console.error(`Failed to get price for ${symbol}:`, error);
+          console.log(`✅ ${symbol}: $${price.price.toFixed(2)}`);
+        } catch (error: any) {
+          // Si es error 429 (rate limit), usar caché antiguo si existe
+          if (error.statusCode === 429) {
+            console.warn(`⚠️  Rate limit hit for ${symbol}, trying cache...`);
+            const cached = await this.getPriceFromCache(symbol, assetType);
+            if (cached) {
+              console.log(`📦 Using cached price for ${symbol}: $${cached.price.toFixed(2)} (stale: ${cached.isStale})`);
+              results.set(symbol, cached);
+            } else {
+              console.error(`❌ No cache available for ${symbol}`);
+            }
+          } else {
+            console.error(`❌ Failed to get price for ${symbol}:`, error.message);
+          }
         }
-      });
-      await Promise.all(promises);
+      }
     }
 
+    // Procesar crypto/forex EN PARALELO (no tienen rate limit estricto)
+    if (others.length > 0) {
+      console.log(`🚀 Fetching ${others.length} crypto/forex in parallel...`);
+      const batchSize = 10;
+      for (let i = 0; i < others.length; i += batchSize) {
+        const batch = others.slice(i, i + batchSize);
+        const promises = batch.map(async ({ symbol, assetType }) => {
+          try {
+            const price = await this.getCurrentPrice(symbol, assetType);
+            results.set(symbol, price);
+          } catch (error) {
+            console.error(`Failed to get price for ${symbol}:`, error);
+          }
+        });
+        await Promise.all(promises);
+      }
+    }
+
+    console.log(`✅ Batch complete: ${results.size}/${symbols.length} prices fetched`);
     return results;
   }
 
@@ -193,6 +251,9 @@ class PriceProviderService {
    */
   private async getStockPrice(symbol: string): Promise<PriceData> {
     try {
+      // Esperar rate limit antes de hacer request
+      await waitForAlphaVantageRateLimit();
+
       const url = 'https://www.alphavantage.co/query';
       const response = await axios.get(url, {
         params: {
@@ -203,6 +264,13 @@ class PriceProviderService {
       });
 
       const quote = response.data['Global Quote'];
+
+      // Detectar mensaje de rate limit en la respuesta
+      if (response.data['Information']) {
+        console.warn(`⚠️  Alpha Vantage rate limit warning for ${symbol}:`, response.data['Information']);
+        throw new AppError(ErrorCodes.EXTERNAL_API_ERROR, 429); // 429 = Too Many Requests
+      }
+
       if (!quote || !quote['05. price']) {
         throw new AppError(ErrorCodes.ENTITY_NOT_FOUND, 404);
       }
@@ -284,6 +352,9 @@ class PriceProviderService {
    */
   private async searchStock(query: string): Promise<AssetSearchResult[]> {
     try {
+      // Esperar rate limit antes de hacer request
+      await waitForAlphaVantageRateLimit();
+
       const url = 'https://www.alphavantage.co/query';
       const response = await axios.get(url, {
         params: {
@@ -292,6 +363,12 @@ class PriceProviderService {
           apikey: this.alphaVantageKey,
         },
       });
+
+      // Detectar mensaje de rate limit
+      if (response.data['Information']) {
+        console.warn('⚠️  Alpha Vantage rate limit warning:', response.data['Information']);
+        return []; // Retornar array vacío en vez de error
+      }
 
       if (!response.data.bestMatches) {
         return [];

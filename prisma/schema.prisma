@@ -41,6 +41,7 @@ model User {
   defaultSharedExpenseAccount   Account?                  @relation("DefaultSharedExpenseAccount", fields: [defaultSharedExpenseAccountId], references: [id])
   investmentHoldings            InvestmentHolding[]
   investmentTransactions        InvestmentTransaction[]
+  investmentImportHistory       InvestmentImportHistory[]
 
   @@map("users")
 }
@@ -68,6 +69,7 @@ model Account {
   usersWithDefaultSharedExpenseAccount User[]          @relation("DefaultSharedExpenseAccount")
   investmentHoldings                   InvestmentHolding[]
   investmentTransactions               InvestmentTransaction[]
+  investmentImportHistory              InvestmentImportHistory[]
 
   @@index([userId])
   @@index([userId, isArchived])
@@ -90,11 +92,12 @@ model Transaction {
   sharedExpenseId      String?               @map("shared_expense_id")
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")
-  loanId               String?               @unique @map("loan_id")
-  importedTransactions ImportedTransaction[]
-  loanPayment          LoanPayment?
-  tags                 TransactionTag[]
-  account              Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  loanId                         String?                              @unique @map("loan_id")
+  importedTransactions           ImportedTransaction[]
+  investmentImportedTransactions InvestmentImportedTransaction[]
+  loanPayment                    LoanPayment?
+  tags                           TransactionTag[]
+  account                        Account                          @relation(fields: [accountId], references: [id], onDelete: Cascade)
   loan                 Loan?                 @relation("LoanTransaction", fields: [loanId], references: [id])
   sharedExpense        SharedExpense?        @relation(fields: [sharedExpenseId], references: [id])
   toAccount            Account?              @relation("TransferDestination", fields: [toAccountId], references: [id])
@@ -540,9 +543,10 @@ model InvestmentTransaction {
   createdAt         DateTime                  @default(now()) @map("created_at")
   updatedAt         DateTime                  @updatedAt @map("updated_at")
 
-  user              User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account           Account                   @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  holding           InvestmentHolding         @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+  user                           User                              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account                        Account                           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  holding                        InvestmentHolding                 @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+  investmentImportedTransactions InvestmentImportedTransaction[]
 
   @@index([userId])
   @@index([accountId])
@@ -567,4 +571,61 @@ model InvestmentPriceCache {
   @@index([assetSymbol])
   @@index([timestamp])
   @@map("investment_price_cache")
+}
+
+// Investment Import History - tracks import operations
+model InvestmentImportHistory {
+  id                    String                           @id @default(uuid())
+  userId                String                           @map("user_id")
+  accountId             String                           @map("account_id")
+  fileName              String                           @map("file_name")
+  fileType              String                           @map("file_type")
+  totalRows             Int                              @map("total_rows")
+  successCount          Int                              @default(0) @map("success_count")
+  failedCount           Int                              @default(0) @map("failed_count")
+  duplicateCount        Int                              @default(0) @map("duplicate_count")
+  status                ImportHistoryStatus              @default(PROCESSING)
+  importedAt            DateTime                         @default(now()) @map("imported_at")
+  completedAt           DateTime?                        @map("completed_at")
+
+  user                  User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account               Account                          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  importedTransactions  InvestmentImportedTransaction[]
+
+  @@index([userId])
+  @@index([accountId])
+  @@index([importedAt])
+  @@index([status])
+  @@map("investment_import_history")
+}
+
+// Investment Imported Transaction - tracks each imported row
+model InvestmentImportedTransaction {
+  id                        String                    @id @default(uuid())
+  importHistoryId           String                    @map("import_history_id")
+  investmentTransactionId   String?                   @map("investment_transaction_id")
+  regularTransactionId      String?                   @map("regular_transaction_id")
+  rowNumber                 Int                       @map("row_number")
+  status                    ImportStatus
+  errorMessage              String?                   @map("error_message")
+  isDuplicate               Boolean                   @default(false) @map("is_duplicate")
+
+  // Original CSV data for reference
+  originalDate              String                    @map("original_date")
+  csvOperationType          String                    @map("csv_operation_type")
+  csvSymbol                 String?                   @map("csv_symbol")
+  csvDescription            String                    @map("csv_description")
+  csvTradeAction            String?                   @map("csv_trade_action")
+  csvQuantity               String?                   @map("csv_quantity")
+  csvPrice                  String?                   @map("csv_price")
+  csvNetAmount              String                    @map("csv_net_amount")
+
+  importHistory             InvestmentImportHistory   @relation(fields: [importHistoryId], references: [id], onDelete: Cascade)
+  investmentTransaction     InvestmentTransaction?    @relation(fields: [investmentTransactionId], references: [id])
+  regularTransaction        Transaction?              @relation(fields: [regularTransactionId], references: [id])
+
+  @@index([importHistoryId])
+  @@index([investmentTransactionId])
+  @@index([regularTransactionId])
+  @@map("investment_imported_transactions")
 }

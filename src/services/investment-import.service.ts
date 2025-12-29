@@ -476,8 +476,13 @@ class InvestmentImportService {
                   const proceedsFromSale = Number(transaction.pricePerUnit) * Number(transaction.quantity) - Number(transaction.fees);
                   const realizedGainLoss = proceedsFromSale - costBasisSold;
 
-                  holding.totalQuantity = (Number(holding.totalQuantity) - Number(transaction.quantity)) as any;
-                  holding.totalCostBasis = (Number(holding.totalCostBasis) - costBasisSold) as any;
+                  const newQuantity = Number(holding.totalQuantity) - Number(transaction.quantity);
+                  const originalCostBasis = Number(holding.totalCostBasis);
+
+                  holding.totalQuantity = newQuantity as any;
+                  // Si la posición se cierra completamente (qty = 0), preservar el costo original para calcular ROI
+                  // Si no, reducir el costo basis proporcionalmente
+                  holding.totalCostBasis = (newQuantity === 0 ? originalCostBasis : originalCostBasis - costBasisSold) as any;
                   holding.realizedGainLoss = (Number(holding.realizedGainLoss || 0) + realizedGainLoss) as any;
                 }
 

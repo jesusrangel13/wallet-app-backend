@@ -517,6 +517,9 @@ class InvestmentHoldingService {
       throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
     }
 
+    // Log for debugging
+    console.log(`📊 [Performance] Calculating for account ${accountId}, period: ${period}`);
+
     // Calculate start date based on period
     const now = new Date();
     let startDate: Date;
@@ -624,9 +627,20 @@ class InvestmentHoldingService {
         holding.totalCost += totalAmount + fees;
         initialCashBalance -= totalAmount + fees;
       } else if (txn.type === 'SELL') {
+        // Calculate cost basis BEFORE modifying quantity to avoid division by zero
+        const costBasisSold = holding.quantity > 0
+          ? (holding.totalCost / holding.quantity) * qty
+          : 0;
+
         holding.quantity -= qty;
-        const costBasisSold = (holding.totalCost / holding.quantity) * qty;
         holding.totalCost -= costBasisSold;
+
+        // Prevent negative values due to floating point errors
+        if (holding.quantity < 0.0001) {
+          holding.quantity = 0;
+          holding.totalCost = 0;
+        }
+
         initialCashBalance += totalAmount - fees;
       } else if (txn.type === 'DIVIDEND' || txn.type === 'INTEREST') {
         initialCashBalance += totalAmount - fees;
@@ -640,11 +654,16 @@ class InvestmentHoldingService {
       (sum, h) => sum + h.totalCost,
       0
     );
-    dataPoints.set(startDate.toISOString().split('T')[0], {
-      date: startDate,
-      value: initialCashBalance + initialCostBasis, // Approximate, will refine with prices
-      costBasis: initialCostBasis,
-    });
+
+    // Validate that values are not NaN before adding
+    const initialValue = initialCashBalance + initialCostBasis;
+    if (!isNaN(initialValue) && isFinite(initialValue) && !isNaN(initialCostBasis)) {
+      dataPoints.set(startDate.toISOString().split('T')[0], {
+        date: startDate,
+        value: initialValue,
+        costBasis: initialCostBasis,
+      });
+    }
 
     // Process transactions in chronological order
     for (const txn of transactions) {
@@ -665,10 +684,20 @@ class InvestmentHoldingService {
         holding.totalCost += totalAmount + fees;
         cashBalance -= totalAmount + fees;
       } else if (txn.type === 'SELL') {
-        const costBasisSold =
-          holding.quantity > 0 ? (holding.totalCost / holding.quantity) * qty : 0;
+        // Calculate cost basis BEFORE modifying quantity to avoid division by zero
+        const costBasisSold = holding.quantity > 0
+          ? (holding.totalCost / holding.quantity) * qty
+          : 0;
+
         holding.quantity -= qty;
         holding.totalCost -= costBasisSold;
+
+        // Prevent negative values due to floating point errors
+        if (holding.quantity < 0.0001) {
+          holding.quantity = 0;
+          holding.totalCost = 0;
+        }
+
         cashBalance += totalAmount - fees;
       } else if (txn.type === 'DIVIDEND' || txn.type === 'INTEREST') {
         cashBalance += totalAmount - fees;
@@ -683,11 +712,14 @@ class InvestmentHoldingService {
       // Approximate value (using cost basis for now, could fetch historical prices)
       const currentValue = cashBalance + currentCostBasis;
 
-      dataPoints.set(dateKey, {
-        date: new Date(txn.transactionDate),
-        value: currentValue,
-        costBasis: currentCostBasis,
-      });
+      // Validate that values are not NaN before adding
+      if (!isNaN(currentValue) && isFinite(currentValue) && !isNaN(currentCostBasis)) {
+        dataPoints.set(dateKey, {
+          date: new Date(txn.transactionDate),
+          value: currentValue,
+          costBasis: currentCostBasis,
+        });
+      }
     }
 
     // Process regular transactions
@@ -708,11 +740,14 @@ class InvestmentHoldingService {
 
       const currentValue = cashBalance + currentCostBasis;
 
-      dataPoints.set(dateKey, {
-        date: new Date(txn.date),
-        value: currentValue,
-        costBasis: currentCostBasis,
-      });
+      // Validate that values are not NaN before adding
+      if (!isNaN(currentValue) && isFinite(currentValue) && !isNaN(currentCostBasis)) {
+        dataPoints.set(dateKey, {
+          date: new Date(txn.date),
+          value: currentValue,
+          costBasis: currentCostBasis,
+        });
+      }
     }
 
     // Add current data point with actual prices
@@ -725,11 +760,14 @@ class InvestmentHoldingService {
       0
     );
 
-    dataPoints.set(now.toISOString().split('T')[0], {
-      date: now,
-      value: currentTotalValue,
-      costBasis: currentCostBasis,
-    });
+    // Validate before adding the current point
+    if (!isNaN(currentTotalValue) && isFinite(currentTotalValue) && !isNaN(currentCostBasis)) {
+      dataPoints.set(now.toISOString().split('T')[0], {
+        date: now,
+        value: currentTotalValue,
+        costBasis: currentCostBasis,
+      });
+    }
 
     // Convert to sorted array
     const result = Array.from(dataPoints.values())
@@ -739,6 +777,13 @@ class InvestmentHoldingService {
         value: point.value,
         costBasis: point.costBasis,
       }));
+
+    // Log result before returning
+    console.log(`✅ [Performance] Calculated ${result.length} data points for account ${accountId}`);
+    if (result.length > 0) {
+      console.log(`   First: ${result[0].date} - Value: ${result[0].value}, Cost: ${result[0].costBasis}`);
+      console.log(`   Last: ${result[result.length - 1].date} - Value: ${result[result.length - 1].value}, Cost: ${result[result.length - 1].costBasis}`);
+    }
 
     // Sample data if too many points (max 100 points)
     if (result.length > 100) {

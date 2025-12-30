@@ -497,6 +497,10 @@ class InvestmentHoldingService {
    * Get portfolio performance history over time
    * Returns an array of data points showing portfolio value at different points in time
    */
+  /**
+   * Get portfolio performance history using snapshots
+   * Uses saved snapshots from transactions for accurate historical data
+   */
   async getPortfolioPerformanceHistory(
     userId: string,
     accountId: string,
@@ -517,7 +521,6 @@ class InvestmentHoldingService {
       throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
     }
 
-    // Log for debugging
     console.log(`📊 [Performance] Calculating for account ${accountId}, period: ${period}`);
 
     // Calculate start date based on period
@@ -538,7 +541,6 @@ class InvestmentHoldingService {
         startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
         break;
       case 'ALL':
-        // Get first transaction date
         const firstTransaction = await prisma.investmentTransaction.findFirst({
           where: { accountId },
           orderBy: { transactionDate: 'asc' },
@@ -549,7 +551,7 @@ class InvestmentHoldingService {
         break;
     }
 
-    // Get all transactions in the period, ordered by date
+    // Get all transactions in the period with snapshots
     const transactions = await prisma.investmentTransaction.findMany({
       where: {
         accountId,
@@ -558,32 +560,18 @@ class InvestmentHoldingService {
       orderBy: { transactionDate: 'asc' },
     });
 
-    // Get regular transactions (deposits/withdrawals) in the period
-    const regularTransactions = await prisma.transaction.findMany({
-      where: {
-        accountId,
-        type: { in: ['INCOME', 'EXPENSE'] },
-        date: { gte: startDate },
-      },
-      orderBy: { date: 'asc' },
-    });
+    if (transactions.length === 0) {
+      return [];
+    }
 
-    // Build timeline of portfolio value
-    const dataPoints: Map<
-      string,
-      { date: Date; value: number; costBasis: number }
-    > = new Map();
+    // Build data points from transaction snapshots
+    const dataPoints: Array<{ date: string; value: number; costBasis: number }> = [];
 
-    // Track current holdings quantities
-    const currentHoldings: Map<
-      string,
-      { quantity: number; totalCost: number }
-    > = new Map();
+    // Track accumulated cost basis (capital invested)
+    let totalInvestedHistorical = 0;
+    let totalWithdrawn = 0;
 
-    // Track cash balance
-    let cashBalance = Number(account.balance);
-
-    // Get initial balance before the period
+    // Calculate initial investment before period
     const initialTransactions = await prisma.investmentTransaction.findMany({
       where: {
         accountId,
@@ -592,206 +580,60 @@ class InvestmentHoldingService {
       orderBy: { transactionDate: 'asc' },
     });
 
-    const initialRegularTxns = await prisma.transaction.findMany({
-      where: {
-        accountId,
-        type: { in: ['INCOME', 'EXPENSE'] },
-        date: { lt: startDate },
-      },
+    for (const tx of initialTransactions) {
+      if (tx.type === 'BUY') {
+        totalInvestedHistorical += Number(tx.totalAmount) + Number(tx.fees);
+      } else if (tx.type === 'SELL') {
+        totalWithdrawn += Number(tx.totalAmount) - Number(tx.fees);
+      }
+    }
+
+    // Process transactions in period
+    for (const tx of transactions) {
+      // Update cost basis tracking
+      if (tx.type === 'BUY') {
+        totalInvestedHistorical += Number(tx.totalAmount) + Number(tx.fees);
+      } else if (tx.type === 'SELL') {
+        totalWithdrawn += Number(tx.totalAmount) - Number(tx.fees);
+      }
+
+      // Use snapshot if available
+      const portfolioValue = tx.snapshotValue
+        ? Number(tx.snapshotValue)
+        : 0; // Fallback if snapshot missing
+
+      // Net cost basis = total invested - total withdrawn
+      const netCostBasis = totalInvestedHistorical - totalWithdrawn;
+
+      dataPoints.push({
+        date: new Date(tx.transactionDate).toISOString().split('T')[0],
+        value: portfolioValue,
+        costBasis: netCostBasis,
+      });
+    }
+
+    // Add current data point with live prices
+    const summary = await this.calculatePortfolioSummary(userId, accountId);
+
+    dataPoints.push({
+      date: now.toISOString().split('T')[0],
+      value: summary.totalValue,
+      costBasis: totalInvestedHistorical - totalWithdrawn,
     });
 
-    // Calculate initial state
-    let initialCashBalance = 0;
-    for (const txn of initialRegularTxns) {
-      if (txn.type === 'INCOME') {
-        initialCashBalance += Number(txn.amount);
-      } else {
-        initialCashBalance -= Number(txn.amount);
-      }
-    }
-
-    for (const txn of initialTransactions) {
-      const symbol = txn.assetSymbol;
-      const qty = Number(txn.quantity);
-      const totalAmount = Number(txn.totalAmount);
-      const fees = Number(txn.fees);
-
-      if (!currentHoldings.has(symbol)) {
-        currentHoldings.set(symbol, { quantity: 0, totalCost: 0 });
-      }
-
-      const holding = currentHoldings.get(symbol)!;
-
-      if (txn.type === 'BUY') {
-        holding.quantity += qty;
-        holding.totalCost += totalAmount + fees;
-        initialCashBalance -= totalAmount + fees;
-      } else if (txn.type === 'SELL') {
-        // Calculate cost basis BEFORE modifying quantity to avoid division by zero
-        const costBasisSold = holding.quantity > 0
-          ? (holding.totalCost / holding.quantity) * qty
-          : 0;
-
-        holding.quantity -= qty;
-        holding.totalCost -= costBasisSold;
-
-        // Prevent negative values due to floating point errors
-        if (holding.quantity < 0.0001) {
-          holding.quantity = 0;
-          holding.totalCost = 0;
-        }
-
-        initialCashBalance += totalAmount - fees;
-      } else if (txn.type === 'DIVIDEND' || txn.type === 'INTEREST') {
-        initialCashBalance += totalAmount - fees;
-      }
-    }
-
-    cashBalance = initialCashBalance;
-
-    // Add initial data point
-    const initialCostBasis = Array.from(currentHoldings.values()).reduce(
-      (sum, h) => sum + h.totalCost,
-      0
-    );
-
-    // Validate that values are not NaN before adding
-    const initialValue = initialCashBalance + initialCostBasis;
-    if (!isNaN(initialValue) && isFinite(initialValue) && !isNaN(initialCostBasis)) {
-      dataPoints.set(startDate.toISOString().split('T')[0], {
-        date: startDate,
-        value: initialValue,
-        costBasis: initialCostBasis,
-      });
-    }
-
-    // Process transactions in chronological order
-    for (const txn of transactions) {
-      const dateKey = new Date(txn.transactionDate).toISOString().split('T')[0];
-      const symbol = txn.assetSymbol;
-      const qty = Number(txn.quantity);
-      const totalAmount = Number(txn.totalAmount);
-      const fees = Number(txn.fees);
-
-      if (!currentHoldings.has(symbol)) {
-        currentHoldings.set(symbol, { quantity: 0, totalCost: 0 });
-      }
-
-      const holding = currentHoldings.get(symbol)!;
-
-      if (txn.type === 'BUY') {
-        holding.quantity += qty;
-        holding.totalCost += totalAmount + fees;
-        cashBalance -= totalAmount + fees;
-      } else if (txn.type === 'SELL') {
-        // Calculate cost basis BEFORE modifying quantity to avoid division by zero
-        const costBasisSold = holding.quantity > 0
-          ? (holding.totalCost / holding.quantity) * qty
-          : 0;
-
-        holding.quantity -= qty;
-        holding.totalCost -= costBasisSold;
-
-        // Prevent negative values due to floating point errors
-        if (holding.quantity < 0.0001) {
-          holding.quantity = 0;
-          holding.totalCost = 0;
-        }
-
-        cashBalance += totalAmount - fees;
-      } else if (txn.type === 'DIVIDEND' || txn.type === 'INTEREST') {
-        cashBalance += totalAmount - fees;
-      }
-
-      // Calculate current cost basis
-      const currentCostBasis = Array.from(currentHoldings.values()).reduce(
-        (sum, h) => sum + h.totalCost,
-        0
-      );
-
-      // Approximate value (using cost basis for now, could fetch historical prices)
-      const currentValue = cashBalance + currentCostBasis;
-
-      // Validate that values are not NaN before adding
-      if (!isNaN(currentValue) && isFinite(currentValue) && !isNaN(currentCostBasis)) {
-        dataPoints.set(dateKey, {
-          date: new Date(txn.transactionDate),
-          value: currentValue,
-          costBasis: currentCostBasis,
-        });
-      }
-    }
-
-    // Process regular transactions
-    for (const txn of regularTransactions) {
-      const dateKey = new Date(txn.date).toISOString().split('T')[0];
-      const amount = Number(txn.amount);
-
-      if (txn.type === 'INCOME') {
-        cashBalance += amount;
-      } else {
-        cashBalance -= amount;
-      }
-
-      const currentCostBasis = Array.from(currentHoldings.values()).reduce(
-        (sum, h) => sum + h.totalCost,
-        0
-      );
-
-      const currentValue = cashBalance + currentCostBasis;
-
-      // Validate that values are not NaN before adding
-      if (!isNaN(currentValue) && isFinite(currentValue) && !isNaN(currentCostBasis)) {
-        dataPoints.set(dateKey, {
-          date: new Date(txn.date),
-          value: currentValue,
-          costBasis: currentCostBasis,
-        });
-      }
-    }
-
-    // Add current data point with actual prices
-    const holdings = await this.getHoldingsByAccount(userId, accountId);
-    const currentTotalValue =
-      cashBalance +
-      holdings.reduce((sum, h) => sum + (h.currentValue || 0), 0);
-    const currentCostBasis = holdings.reduce(
-      (sum, h) => sum + Number(h.totalCostBasis),
-      0
-    );
-
-    // Validate before adding the current point
-    if (!isNaN(currentTotalValue) && isFinite(currentTotalValue) && !isNaN(currentCostBasis)) {
-      dataPoints.set(now.toISOString().split('T')[0], {
-        date: now,
-        value: currentTotalValue,
-        costBasis: currentCostBasis,
-      });
-    }
-
-    // Convert to sorted array
-    const result = Array.from(dataPoints.values())
-      .sort((a, b) => a.date.getTime() - b.date.getTime())
-      .map((point) => ({
-        date: point.date.toISOString().split('T')[0],
-        value: point.value,
-        costBasis: point.costBasis,
-      }));
-
-    // Log result before returning
-    console.log(`✅ [Performance] Calculated ${result.length} data points for account ${accountId}`);
-    if (result.length > 0) {
-      console.log(`   First: ${result[0].date} - Value: ${result[0].value}, Cost: ${result[0].costBasis}`);
-      console.log(`   Last: ${result[result.length - 1].date} - Value: ${result[result.length - 1].value}, Cost: ${result[result.length - 1].costBasis}`);
+    console.log(`✅ [Performance] Generated ${dataPoints.length} data points for account ${accountId}`);
+    if (dataPoints.length > 0) {
+      console.log(`   First: ${dataPoints[0].date} - Value: ${dataPoints[0].value.toFixed(2)}, Cost: ${dataPoints[0].costBasis.toFixed(2)}`);
+      console.log(`   Last: ${dataPoints[dataPoints.length - 1].date} - Value: ${dataPoints[dataPoints.length - 1].value.toFixed(2)}, Cost: ${dataPoints[dataPoints.length - 1].costBasis.toFixed(2)}`);
     }
 
     // Sample data if too many points (max 100 points)
-    if (result.length > 100) {
-      const step = Math.ceil(result.length / 100);
-      return result.filter((_, index) => index % step === 0);
+    if (dataPoints.length > 100) {
+      const step = Math.ceil(dataPoints.length / 100);
+      return dataPoints.filter((_, index) => index % step === 0);
     }
 
-    return result;
+    return dataPoints;
   }
 
   /**

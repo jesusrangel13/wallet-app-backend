@@ -540,6 +540,7 @@ model InvestmentTransaction {
   currency          String                    @default("USD")
   transactionDate   DateTime                  @default(now()) @map("transaction_date")
   notes             String?
+  snapshotValue     Decimal?                  @map("snapshot_value") @db.Decimal(15, 2) // Portfolio value snapshot at transaction time
   createdAt         DateTime                  @default(now()) @map("created_at")
   updatedAt         DateTime                  @updatedAt @map("updated_at")
 

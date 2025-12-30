@@ -191,7 +191,7 @@ class InvestmentTransactionService {
         throw new AppError(ErrorCodes.ENTITY_NOT_FOUND, 404);
       }
 
-      // Crear la transacción
+      // Crear la transacción (sin snapshot inicialmente)
       const transaction = await tx.investmentTransaction.create({
         data: {
           userId,
@@ -208,6 +208,7 @@ class InvestmentTransactionService {
           exchangeRate: data.exchangeRate || null,
           transactionDate: data.transactionDate || new Date(),
           notes: data.notes || null,
+          snapshotValue: null, // Will be calculated after transaction completes
         },
       });
 
@@ -254,6 +255,26 @@ class InvestmentTransactionService {
         currency,
         isBuy
       );
+    }
+
+    // Calcular y guardar snapshot del portafolio DESPUÉS de la transacción
+    // Solo si no se está haciendo un batch update (imports masivos)
+    if (!options?.accumulateBalanceOnly) {
+      try {
+        const snapshot = await this.calculatePortfolioSnapshot(
+          userId,
+          data.accountId,
+          data.transactionDate || new Date()
+        );
+
+        await prisma.investmentTransaction.update({
+          where: { id: result.transaction.id },
+          data: { snapshotValue: snapshot.totalValue },
+        });
+      } catch (error) {
+        // Log error pero no fallar la transacción
+        console.error('Error calculating portfolio snapshot:', error);
+      }
     }
 
     return result;
@@ -505,6 +526,97 @@ class InvestmentTransactionService {
     const proceeds = sellPrice * sellQuantity - fees;
     const costBasis = averageCostPerUnit * sellQuantity;
     return proceeds - costBasis;
+  }
+
+  /**
+   * Calcular el valor total del portafolio en un momento específico
+   * Usa precios de transacciones para estimar valor histórico
+   */
+  async calculatePortfolioSnapshot(
+    userId: string,
+    accountId: string,
+    snapshotDate: Date
+  ): Promise<{ totalValue: number; cashBalance: number }> {
+    // 1. Obtener balance de cuenta actual
+    const account = await prisma.account.findUnique({
+      where: { id: accountId },
+    });
+
+    if (!account) {
+      return { totalValue: 0, cashBalance: 0 };
+    }
+
+    // 2. Obtener todas las transacciones hasta esta fecha
+    const transactions = await prisma.investmentTransaction.findMany({
+      where: {
+        userId,
+        accountId,
+        transactionDate: { lte: snapshotDate },
+      },
+      orderBy: { transactionDate: 'asc' },
+    });
+
+    // 3. Simular estado de holdings en ese momento
+    const holdings = new Map<string, {
+      quantity: number;
+      assetSymbol: string;
+      assetType: string;
+    }>();
+
+    for (const tx of transactions) {
+      const key = tx.assetSymbol;
+      let holding = holdings.get(key);
+
+      if (!holding) {
+        holding = {
+          quantity: 0,
+          assetSymbol: tx.assetSymbol,
+          assetType: tx.assetType,
+        };
+        holdings.set(key, holding);
+      }
+
+      switch (tx.type) {
+        case 'BUY':
+          holding.quantity += Number(tx.quantity);
+          break;
+
+        case 'SELL':
+          holding.quantity -= Number(tx.quantity);
+          break;
+
+        // DIVIDEND e INTEREST no afectan cantidad
+        case 'DIVIDEND':
+        case 'INTEREST':
+          break;
+      }
+    }
+
+    // 4. Calcular valor de holdings usando precio de última transacción conocida
+    let totalHoldingsValue = 0;
+
+    for (const [symbol, holding] of holdings) {
+      if (holding.quantity > 0) {
+        // Buscar última transacción de este activo (BUY o SELL)
+        const lastTx = transactions
+          .filter(t =>
+            t.assetSymbol === symbol &&
+            (t.type === 'BUY' || t.type === 'SELL')
+          )
+          .pop();
+
+        const estimatedPrice = lastTx ? Number(lastTx.pricePerUnit) : 0;
+        totalHoldingsValue += holding.quantity * estimatedPrice;
+      }
+    }
+
+    // 5. Cash balance actual de la cuenta
+    const cashBalance = Number(account.balance);
+
+    return {
+      totalValue: cashBalance + totalHoldingsValue,
+      cashBalance,
+    };
   }
 }
 

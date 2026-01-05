@@ -345,27 +345,80 @@ class InvestmentHoldingService {
     });
 
     if (isBuy) {
-      // COMPRA: Crear o actualizar holding
+      // COMPRA: Crear o actualizar holding (puede cubrir shorts)
       if (existingHolding) {
-        // Calcular nuevo promedio ponderado
-        const currentTotalValue =
-          Number(existingHolding.averageCostPerUnit) *
-          Number(existingHolding.totalQuantity);
-        const newPurchaseValue = pricePerUnit * quantity + fees;
-        const newTotalQuantity = Number(existingHolding.totalQuantity) + quantity;
-        const newAverageCost = (currentTotalValue + newPurchaseValue) / newTotalQuantity;
-        const newTotalCostBasis = Number(existingHolding.totalCostBasis) + newPurchaseValue;
+        const currentQty = Number(existingHolding.totalQuantity);
+        const wasShort = currentQty < 0;
+        const newTotalQuantity = currentQty + quantity;
+        const isNowLong = newTotalQuantity > 0;
+        const isClosed = newTotalQuantity === 0;
 
-        return await prisma.investmentHolding.update({
-          where: { id: existingHolding.id },
-          data: {
-            totalQuantity: newTotalQuantity,
-            averageCostPerUnit: newAverageCost,
-            totalCostBasis: newTotalCostBasis,
-          },
-        });
+        let newAverageCost;
+        let newTotalCostBasis;
+        let realizedGainLoss = 0;
+
+        if (wasShort) {
+          // Cubriendo posición short
+          if (isClosed) {
+            // Completamente cubierto - calcular P&L
+            const shortOpenCost = Math.abs(Number(existingHolding.totalCostBasis));
+            const coverCost = pricePerUnit * quantity + fees;
+            realizedGainLoss = shortOpenCost - coverCost; // Ganancia si compramos más barato
+
+            newTotalCostBasis = Number(existingHolding.totalCostBasis);
+            newAverageCost = Number(existingHolding.averageCostPerUnit);
+          } else if (isNowLong) {
+            // Cubierto short y abierto long
+            const shortQty = Math.abs(currentQty);
+            const coverCost = pricePerUnit * shortQty + (fees * shortQty / quantity);
+            realizedGainLoss = Math.abs(Number(existingHolding.totalCostBasis)) - coverCost;
+
+            const remainingQty = newTotalQuantity;
+            const remainingCost = pricePerUnit * remainingQty + (fees * remainingQty / quantity);
+            newAverageCost = remainingCost / remainingQty;
+            newTotalCostBasis = remainingCost;
+          } else {
+            // Todavía short, parcialmente cubierto
+            const coverQty = quantity;
+            const coverProportion = coverQty / Math.abs(currentQty);
+            const costBasisCovered = Math.abs(Number(existingHolding.totalCostBasis)) * coverProportion;
+            const actualCoverCost = pricePerUnit * coverQty + fees;
+            realizedGainLoss = costBasisCovered - actualCoverCost;
+
+            newTotalCostBasis = Number(existingHolding.totalCostBasis) + costBasisCovered;
+            newAverageCost = Number(existingHolding.averageCostPerUnit);
+          }
+
+          return await prisma.investmentHolding.update({
+            where: { id: existingHolding.id },
+            data: {
+              totalQuantity: newTotalQuantity,
+              averageCostPerUnit: newAverageCost,
+              totalCostBasis: newTotalCostBasis,
+              realizedGainLoss: {
+                increment: realizedGainLoss,
+              },
+            },
+          });
+        } else {
+          // Posición long normal - lógica existente
+          const currentTotalValue =
+            Number(existingHolding.averageCostPerUnit) * Number(existingHolding.totalQuantity);
+          const newPurchaseValue = pricePerUnit * quantity + fees;
+          const newAverageCost = (currentTotalValue + newPurchaseValue) / newTotalQuantity;
+          const newTotalCostBasis = Number(existingHolding.totalCostBasis) + newPurchaseValue;
+
+          return await prisma.investmentHolding.update({
+            where: { id: existingHolding.id },
+            data: {
+              totalQuantity: newTotalQuantity,
+              averageCostPerUnit: newAverageCost,
+              totalCostBasis: newTotalCostBasis,
+            },
+          });
+        }
       } else {
-        // Crear nuevo holding
+        // Crear nuevo holding - lógica existente funciona
         const totalCost = pricePerUnit * quantity + fees;
         return await prisma.investmentHolding.create({
           data: {
@@ -382,52 +435,77 @@ class InvestmentHoldingService {
         });
       }
     } else {
-      // VENTA: Reducir holding
+      // VENTA: Reducir holding o crear short position
+
       if (!existingHolding) {
-        throw new AppError(ErrorCodes.ENTITY_NOT_FOUND, 404);
-      }
-
-      if (Number(existingHolding.totalQuantity) < quantity) {
-        throw new AppError(ErrorCodes.INSUFFICIENT_BALANCE, 400);
-      }
-
-      const newTotalQuantity = Number(existingHolding.totalQuantity) - quantity;
-
-      // Calcular ganancia/pérdida realizada
-      const costBasisSold = Number(existingHolding.averageCostPerUnit) * quantity;
-      const proceedsFromSale = pricePerUnit * quantity - fees;
-      const realizedGainLoss = proceedsFromSale - costBasisSold;
-
-      if (newTotalQuantity === 0) {
-        // Mantener el holding pero con cantidad 0
-        // IMPORTANTE: NO ponemos totalCostBasis a 0 para poder calcular ROI
-        const originalCostBasis = Number(existingHolding.totalCostBasis);
-        return await prisma.investmentHolding.update({
-          where: { id: existingHolding.id },
+        // Abriendo posición short
+        const shortCostBasis = pricePerUnit * quantity - fees;
+        return await prisma.investmentHolding.create({
           data: {
-            totalQuantity: 0,
-            totalCostBasis: originalCostBasis, // Mantener el costo original para calcular ROI
-            realizedGainLoss: {
-              increment: realizedGainLoss,
-            },
-          },
-        });
-      } else {
-        // Reducir cantidad y cost basis proporcionalmente
-        const newTotalCostBasis =
-          Number(existingHolding.totalCostBasis) - costBasisSold;
-
-        return await prisma.investmentHolding.update({
-          where: { id: existingHolding.id },
-          data: {
-            totalQuantity: newTotalQuantity,
-            totalCostBasis: newTotalCostBasis,
-            realizedGainLoss: {
-              increment: realizedGainLoss,
-            },
+            userId,
+            accountId,
+            assetSymbol: assetSymbol.toUpperCase(),
+            assetName,
+            assetType,
+            totalQuantity: -quantity,  // Cantidad negativa
+            averageCostPerUnit: pricePerUnit,
+            totalCostBasis: -shortCostBasis,  // Cost basis negativo para shorts
+            currency,
           },
         });
       }
+
+      const currentQty = Number(existingHolding.totalQuantity);
+      const newTotalQuantity = currentQty - quantity;
+
+      const wasLong = currentQty > 0;
+      const wasShort = currentQty < 0;
+      const isNowLong = newTotalQuantity > 0;
+      const isNowShort = newTotalQuantity < 0;
+      const isClosed = newTotalQuantity === 0;
+
+      let realizedGainLoss = 0;
+      let newTotalCostBasis = Number(existingHolding.totalCostBasis);
+      let newAverageCost = Number(existingHolding.averageCostPerUnit);
+
+      if (wasLong) {
+        // Vendiendo desde posición long
+        const costBasisSold = Number(existingHolding.averageCostPerUnit) * quantity;
+        const proceedsFromSale = pricePerUnit * quantity - fees;
+        realizedGainLoss = proceedsFromSale - costBasisSold;
+
+        if (isClosed) {
+          newTotalCostBasis = Number(existingHolding.totalCostBasis);
+        } else if (isNowLong) {
+          newTotalCostBasis -= costBasisSold;
+        } else if (isNowShort) {
+          // Cruzamos de long a short
+          const shortQuantity = Math.abs(newTotalQuantity);
+          const shortCostBasis = pricePerUnit * shortQuantity - (fees * shortQuantity / quantity);
+          newTotalCostBasis = -shortCostBasis;
+          newAverageCost = pricePerUnit;
+        }
+      } else if (wasShort) {
+        // Añadiendo a posición short (vendiendo más)
+        const currentShortValue = Math.abs(Number(existingHolding.totalCostBasis));
+        const newShortValue = pricePerUnit * quantity - fees;
+        const totalShortQuantity = Math.abs(newTotalQuantity);
+
+        newAverageCost = (currentShortValue + newShortValue) / totalShortQuantity;
+        newTotalCostBasis = -(currentShortValue + newShortValue);
+      }
+
+      return await prisma.investmentHolding.update({
+        where: { id: existingHolding.id },
+        data: {
+          totalQuantity: newTotalQuantity,
+          averageCostPerUnit: newAverageCost,
+          totalCostBasis: newTotalCostBasis,
+          realizedGainLoss: {
+            increment: realizedGainLoss,
+          },
+        },
+      });
     }
   }
 

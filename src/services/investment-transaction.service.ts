@@ -21,6 +21,7 @@ interface BaseTransactionData {
   transactionDate?: Date;
   notes?: string;
   exchangeRate?: number;
+  netAmount?: number; // Optional: exact net amount from broker CSV (bypasses calculation)
 }
 
 // Tipo para transacciones BUY/SELL
@@ -155,14 +156,31 @@ class InvestmentTransactionService {
         }
       }
 
-      // Si es SELL, validar que existe y tiene suficiente cantidad
+      // Si es SELL, crear holding si no existe (para ventas en corto)
       if (!isBuy && !isDividendOrInterest) {
         if (!holding) {
-          throw new AppError(ErrorCodes.ENTITY_NOT_FOUND, 404);
+          // Crear holding para posición short
+          holding = await tx.investmentHolding.create({
+            data: {
+              userId,
+              accountId: data.accountId,
+              assetSymbol: data.assetSymbol.toUpperCase(),
+              assetName: data.assetName,
+              assetType: data.assetType,
+              totalQuantity: 0,
+              averageCostPerUnit: 0,
+              totalCostBasis: 0,
+              currency,
+            },
+          });
+
+          // Agregar el nuevo holding al cache si está disponible
+          if (options?.holdingsCache) {
+            options.holdingsCache.set(holding.assetSymbol, holding);
+          }
         }
-        if (Number(holding.totalQuantity) < quantity) {
-          throw new AppError(ErrorCodes.INSUFFICIENT_BALANCE, 400);
-        }
+        // Permitir que totalQuantity vaya negativo (short sales)
+        // NO validar cantidad suficiente
       }
 
       // Si es BUY y no existe holding, crear uno temporal
@@ -215,15 +233,22 @@ class InvestmentTransactionService {
       // Calcular cambio de balance
       let balanceChange: number;
 
-      if (isDividendOrInterest) {
-        // Dividendos/intereses son ingresos: incrementar balance
-        balanceChange = totalAmount - fees;
-      } else if (isBuy) {
-        // Compras: decrementar balance
-        balanceChange = -(totalAmount + fees);
+      // Si netAmount es proporcionado (desde CSV import), usarlo directamente
+      // Esto evita errores de redondeo y usa el valor exacto del broker
+      if (data.netAmount !== undefined && data.netAmount !== null) {
+        balanceChange = data.netAmount;
       } else {
-        // Ventas: incrementar balance
-        balanceChange = totalAmount - fees;
+        // Fallback: calcular desde quantity/price/fees (para transacciones manuales)
+        if (isDividendOrInterest) {
+          // Dividendos/intereses son ingresos: incrementar balance
+          balanceChange = totalAmount - fees;
+        } else if (isBuy) {
+          // Compras: decrementar balance
+          balanceChange = -(totalAmount + fees);
+        } else {
+          // Ventas: incrementar balance
+          balanceChange = totalAmount - fees;
+        }
       }
 
       // Actualizar balance solo si no se está acumulando para batch update

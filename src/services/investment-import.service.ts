@@ -48,6 +48,7 @@ interface DetectedTransaction {
   pricePerUnit?: number;
   amount?: number;
   fees?: number;
+  netAmount?: number; // Exact net amount from broker CSV (for TRADE transactions)
   date: Date;
 }
 
@@ -66,6 +67,44 @@ function parseEuropeanNumber(value: string): number {
  */
 class InvestmentImportService {
   /**
+   * Infiere el tipo de activo basándose en el símbolo
+   */
+  private inferAssetType(symbol: string): 'STOCK' | 'ETF' | 'CRYPTO' | 'FOREX' {
+    const upperSymbol = symbol.toUpperCase();
+
+    // Cryptocurrencies conocidas
+    const cryptos = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'ADA', 'XRP', 'DOGE', 'DOT', 'MATIC', 'AVAX', 'LINK', 'UNI', 'ATOM', 'LTC', 'BCH', 'XLM', 'ALGO', 'VET', 'ICP', 'FIL', 'TRX', 'ETC', 'THETA', 'XMR', 'AAVE', 'EOS', 'AXS', 'CAKE', 'GRT'];
+    // Sufijos crypto
+    if (upperSymbol.endsWith('-USD') || upperSymbol.endsWith('USD') && upperSymbol.length <= 7) {
+      return 'CRYPTO';
+    }
+    // Símbolos crypto conocidos
+    if (cryptos.includes(upperSymbol)) {
+      return 'CRYPTO';
+    }
+
+    // ETFs conocidos (principales ETFs de US)
+    const etfs = [
+      'SPY', 'QQQ', 'VOO', 'VTI', 'IWM', 'DIA', 'EEM', 'GLD', 'SLV', 'TLT',
+      'IVV', 'VEA', 'AGG', 'VWO', 'IEFA', 'BND', 'VUG', 'IJR', 'VTV', 'IEMG',
+      'VO', 'VGT', 'VCIT', 'VB', 'SCHD', 'VNQ', 'XLE', 'XLF', 'XLK', 'XLV',
+      'XLI', 'XLP', 'XLY', 'XLU', 'XLB', 'XLRE', 'XLC', 'EWJ', 'EWZ', 'FXI',
+      'VIG', 'VTEB', 'IJH', 'VYM', 'VXUS', 'BSV', 'MUB', 'LQD', 'HYG', 'BNDX'
+    ];
+    if (etfs.includes(upperSymbol)) {
+      return 'ETF';
+    }
+
+    // Forex pairs (formato XXX/YYY)
+    if (upperSymbol.includes('/') && upperSymbol.length <= 7) {
+      return 'FOREX';
+    }
+
+    // Por defecto, STOCK (la mayoría de los casos)
+    return 'STOCK';
+  }
+
+  /**
    * Detecta el tipo de transacción basándose en los datos del CSV
    */
   private detectTransactionType(row: InvestmentCSVRow): DetectedTransaction {
@@ -78,19 +117,25 @@ class InvestmentImportService {
       const pricePerUnit = parseEuropeanNumber(row['Price']);
       const assetSymbol = row['Symbol'].toUpperCase();
 
-      // 🔧 NUEVO: Leer fees desde la columna "Fees" del CSV (si existe)
-      // Si no existe la columna "Fees", usar 0 (retrocompatibilidad con CSV antiguo)
-      const fees = row['Fees'] ? parseEuropeanNumber(row['Fees']) : 0;
+      // Leer fees desde la columna "Fees" del CSV (si existe)
+      const feesRaw = row['Fees'];
+      const fees = feesRaw && feesRaw !== 'undefined' && feesRaw !== ''
+        ? parseEuropeanNumber(feesRaw)
+        : 0;
+
+      // Leer Net amount del CSV para usar el valor exacto del broker
+      const netAmount = parseEuropeanNumber(row['Net amount']);
 
       if (tradeAction === 'BUY' || tradeAction === 'SELL') {
         return {
           transactionType: 'INVESTMENT',
           investmentType: tradeAction,
           assetSymbol,
-          assetName: assetSymbol, // Usar símbolo como nombre por defecto
+          assetName: assetSymbol,
           quantity,
           pricePerUnit,
-          fees, // 🔧 CAMBIO: Usar fees del CSV, no calcularlos
+          fees,
+          netAmount, // Usar el valor exacto del broker (evita errores de redondeo)
           date,
         };
       }
@@ -146,6 +191,17 @@ class InvestmentImportService {
         return {
           transactionType: 'REGULAR',
           regularType: 'EXPENSE',
+          amount: Math.abs(amount),
+          date,
+        };
+      }
+
+      // Fee (cargos/comisiones mensuales)
+      // Nota: FEE puede ser negativo (cargo) o positivo (crédito/ajuste)
+      if (description === 'FEE') {
+        return {
+          transactionType: 'REGULAR',
+          regularType: amount < 0 ? 'EXPENSE' : 'INCOME',
           amount: Math.abs(amount),
           date,
         };
@@ -428,11 +484,12 @@ class InvestmentImportService {
                 accountId,
                 assetSymbol: detected.assetSymbol!,
                 assetName: detected.assetName!,
-                assetType: 'STOCK',
+                assetType: this.inferAssetType(detected.assetSymbol!),
                 type: detected.investmentType!,
                 fees: detected.fees || 0,
                 currency: 'USD',
                 transactionDate: detected.date,
+                netAmount: detected.netAmount, // Pass exact net amount from CSV
               };
 
               if (detected.investmentType === 'BUY' || detected.investmentType === 'SELL') {
@@ -464,25 +521,98 @@ class InvestmentImportService {
               if (holding) {
                 // Actualizar cantidades en memoria
                 if (transaction.type === 'BUY') {
-                  const currentValue = Number(holding.averageCostPerUnit) * Number(holding.totalQuantity);
-                  const newValue = Number(transaction.pricePerUnit) * Number(transaction.quantity) + Number(transaction.fees);
-                  const newQty = Number(holding.totalQuantity) + Number(transaction.quantity);
+                  const currentQty = Number(holding.totalQuantity);
+                  const wasShort = currentQty < 0;
+                  const newQty = currentQty + Number(transaction.quantity);
+                  const isNowLong = newQty > 0;
+                  const isClosed = newQty === 0;
+
+                  let newAvgCost;
+                  let newCostBasis;
+                  let realizedGainLoss = 0;
+
+                  if (wasShort) {
+                    // Cubriendo short
+                    if (isClosed) {
+                      const shortOpenCost = Math.abs(Number(holding.totalCostBasis));
+                      const coverCost = Number(transaction.pricePerUnit) * Number(transaction.quantity) + Number(transaction.fees);
+                      realizedGainLoss = shortOpenCost - coverCost;
+                      newCostBasis = Number(holding.totalCostBasis);
+                      newAvgCost = Number(holding.averageCostPerUnit);
+                    } else if (isNowLong) {
+                      const shortQty = Math.abs(currentQty);
+                      const coverCost = Number(transaction.pricePerUnit) * shortQty + (Number(transaction.fees) * shortQty / Number(transaction.quantity));
+                      realizedGainLoss = Math.abs(Number(holding.totalCostBasis)) - coverCost;
+
+                      const remainingQty = newQty;
+                      const remainingCost = Number(transaction.pricePerUnit) * remainingQty + (Number(transaction.fees) * remainingQty / Number(transaction.quantity));
+                      newAvgCost = remainingCost / remainingQty;
+                      newCostBasis = remainingCost;
+                    } else {
+                      const coverQty = Number(transaction.quantity);
+                      const coverProportion = coverQty / Math.abs(currentQty);
+                      const costBasisCovered = Math.abs(Number(holding.totalCostBasis)) * coverProportion;
+                      const actualCoverCost = Number(transaction.pricePerUnit) * coverQty + Number(transaction.fees);
+                      realizedGainLoss = costBasisCovered - actualCoverCost;
+
+                      newCostBasis = Number(holding.totalCostBasis) + costBasisCovered;
+                      newAvgCost = Number(holding.averageCostPerUnit);
+                    }
+                  } else {
+                    // Compra long normal
+                    const currentValue = Number(holding.averageCostPerUnit) * Number(holding.totalQuantity);
+                    const newValue = Number(transaction.pricePerUnit) * Number(transaction.quantity) + Number(transaction.fees);
+                    newAvgCost = (currentValue + newValue) / newQty;
+                    newCostBasis = Number(holding.totalCostBasis) + newValue;
+                  }
 
                   holding.totalQuantity = newQty as any;
-                  holding.averageCostPerUnit = ((currentValue + newValue) / newQty) as any;
-                  holding.totalCostBasis = (Number(holding.totalCostBasis) + newValue) as any;
+                  holding.averageCostPerUnit = newAvgCost as any;
+                  holding.totalCostBasis = newCostBasis as any;
+                  holding.realizedGainLoss = (Number(holding.realizedGainLoss || 0) + realizedGainLoss) as any;
                 } else if (transaction.type === 'SELL') {
-                  const costBasisSold = Number(holding.averageCostPerUnit) * Number(transaction.quantity);
-                  const proceedsFromSale = Number(transaction.pricePerUnit) * Number(transaction.quantity) - Number(transaction.fees);
-                  const realizedGainLoss = proceedsFromSale - costBasisSold;
+                  const currentQty = Number(holding.totalQuantity);
+                  const newQuantity = currentQty - Number(transaction.quantity);
 
-                  const newQuantity = Number(holding.totalQuantity) - Number(transaction.quantity);
-                  const originalCostBasis = Number(holding.totalCostBasis);
+                  const wasLong = currentQty > 0;
+                  const wasShort = currentQty < 0;
+                  const isNowShort = newQuantity < 0;
+                  const isClosed = newQuantity === 0;
+
+                  let realizedGainLoss = 0;
+                  let newCostBasis = Number(holding.totalCostBasis);
+                  let newAvgCost = Number(holding.averageCostPerUnit);
+
+                  if (wasLong) {
+                    const costBasisSold = Number(holding.averageCostPerUnit) * Number(transaction.quantity);
+                    const proceedsFromSale = Number(transaction.pricePerUnit) * Number(transaction.quantity) - Number(transaction.fees);
+                    realizedGainLoss = proceedsFromSale - costBasisSold;
+
+                    if (isClosed) {
+                      newCostBasis = Number(holding.totalCostBasis);
+                    } else if (isNowShort) {
+                      // Cruzó a short
+                      const shortQty = Math.abs(newQuantity);
+                      const shortValue = Number(transaction.pricePerUnit) * shortQty - (Number(transaction.fees) * shortQty / Number(transaction.quantity));
+                      newCostBasis = -shortValue;
+                      newAvgCost = Number(transaction.pricePerUnit);
+                    } else {
+                      // Todavía long
+                      newCostBasis = Number(holding.totalCostBasis) - costBasisSold;
+                    }
+                  } else if (wasShort || currentQty === 0) {
+                    // Añadiendo a short o abriendo short
+                    const currentShortValue = Math.abs(Number(holding.totalCostBasis));
+                    const newShortValue = Number(transaction.pricePerUnit) * Number(transaction.quantity) - Number(transaction.fees);
+                    const totalShortQty = Math.abs(newQuantity);
+
+                    newAvgCost = (currentShortValue + newShortValue) / totalShortQty;
+                    newCostBasis = -(currentShortValue + newShortValue);
+                  }
 
                   holding.totalQuantity = newQuantity as any;
-                  // Si la posición se cierra completamente (qty = 0), preservar el costo original para calcular ROI
-                  // Si no, reducir el costo basis proporcionalmente
-                  holding.totalCostBasis = (newQuantity === 0 ? originalCostBasis : originalCostBasis - costBasisSold) as any;
+                  holding.averageCostPerUnit = newAvgCost as any;
+                  holding.totalCostBasis = newCostBasis as any;
                   holding.realizedGainLoss = (Number(holding.realizedGainLoss || 0) + realizedGainLoss) as any;
                 }
 

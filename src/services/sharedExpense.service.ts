@@ -893,6 +893,7 @@ export const markParticipantAsPaid = async (
           categoryId: debtPaymentCategory?.id,
           description: `Pago a ${payeeUser?.name} por "${expense.description}"`,
           date: new Date().toISOString(),
+          sharedExpenseId: expenseId,
           tags: [],
         }),
         // Create INCOME transaction for the payee
@@ -903,6 +904,7 @@ export const markParticipantAsPaid = async (
           categoryId: debtCollectionCategory?.id,
           description: `Recibido de ${debtorUser?.name} por "${expense.description}"`,
           date: new Date().toISOString(),
+          sharedExpenseId: expenseId,
           tags: [],
         }),
       ]);
@@ -1172,6 +1174,7 @@ export const settleAllBalance = async (
             categoryId: debtPaymentCategory?.id,
             description: `Pago de balance compartido a ${otherUser?.name}.`,
             date: new Date().toISOString(),
+            sharedExpenseId: expenses.length > 0 ? expenses[0].id : undefined,
             tags: [],
           }),
           // Income transaction for the receiver (other user)
@@ -1182,6 +1185,7 @@ export const settleAllBalance = async (
             categoryId: debtCollectionCategory?.id,
             description: `Recibido de ${initiatorUser?.name} por balance compartido.`,
             date: new Date().toISOString(),
+            sharedExpenseId: expenses.length > 0 ? expenses[0].id : undefined,
             tags: [],
           }),
         ]);
@@ -1197,6 +1201,7 @@ export const settleAllBalance = async (
             categoryId: debtCollectionCategory?.id,
             description: `Recibido de ${otherUser?.name} por balance compartido.`,
             date: new Date().toISOString(),
+            sharedExpenseId: expenses.length > 0 ? expenses[0].id : undefined,
             tags: [],
           }),
           // Expense transaction for the payer (other user)
@@ -1207,6 +1212,7 @@ export const settleAllBalance = async (
             categoryId: debtPaymentCategory?.id,
             description: `Pago de balance compartido a ${initiatorUser?.name}.`,
             date: new Date().toISOString(),
+            sharedExpenseId: expenses.length > 0 ? expenses[0].id : undefined,
             tags: [],
           }),
         ]);

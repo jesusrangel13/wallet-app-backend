@@ -200,6 +200,19 @@ export const createTransaction = async (
   });
 
   // OPTIMIZATION: Return category info resolved during validation (no redundant DB query)
+
+  // LEARNING: Async learn from this transaction pattern
+  // If we have a payee and a category, we can learn this association
+  if (data.payee && data.categoryId) {
+    // Import dynamically to avoid circular dependencies if any (though SmartMatcher is leaf)
+    // Or just instantiate if imported
+    import('./voice/smartMatcher.service').then(({ SmartMatcherService }) => {
+      const matcher = new SmartMatcherService();
+      // We learn that this PAYEE maps to this CATEGORY
+      matcher.learn(userId, data.payee!, data.categoryId!, data.payee);
+    }).catch(err => console.error("Failed to trigger smart learning", err));
+  }
+
   return { ...result, category: categoryInfo };
 };
 
@@ -840,6 +853,19 @@ export const getTransactionStats = async (userId: string, month: number, year: n
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 0, 23, 59, 59);
 
+  // Find categories to exclude from stats
+  const [prestamoOtorgadoCategory, cobroPrestamoCategory, cobroDeudaCategory] = await Promise.all([
+    prisma.categoryTemplate.findFirst({
+      where: { name: 'Préstamo otorgado', type: 'EXPENSE' },
+    }),
+    prisma.categoryTemplate.findFirst({
+      where: { name: 'Cobro de préstamo', type: 'INCOME' },
+    }),
+    prisma.categoryTemplate.findFirst({
+      where: { name: 'Cobro de deuda', type: 'INCOME' },
+    }),
+  ]);
+
   const transactions = await prisma.transaction.findMany({
     where: {
       userId,
@@ -847,6 +873,7 @@ export const getTransactionStats = async (userId: string, month: number, year: n
         gte: startDate,
         lte: endDate,
       },
+      loanId: null, // Exclude loan disbursements
     },
     select: {
       categoryId: true,
@@ -874,7 +901,11 @@ export const getTransactionStats = async (userId: string, month: number, year: n
     const categoryInfo = t.categoryId ? categoryMap.get(t.categoryId) : null;
     const categoryName = categoryInfo?.name || 'Uncategorized';
 
-    if (t.type === 'INCOME') {
+    // Skip loan repayments and shared expense settlements from income
+    const isLoanRepayment = cobroPrestamoCategory && t.categoryId === cobroPrestamoCategory.id;
+    const isDebtCollection = cobroDeudaCategory && t.categoryId === cobroDeudaCategory.id;
+
+    if (t.type === 'INCOME' && !isLoanRepayment && !isDebtCollection) {
       stats.totalIncome += Number(t.amount);
     } else if (t.type === 'EXPENSE') {
       stats.totalExpense += Number(t.amount);

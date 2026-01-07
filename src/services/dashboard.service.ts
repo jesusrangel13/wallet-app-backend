@@ -748,6 +748,7 @@ export const getPersonalExpenses = async (userId: string, month?: number, year?:
     userId,
     type: 'EXPENSE',
     sharedExpenseId: null, // NOT shared
+    loanId: null, // NOT loan disbursements
     date: {
       gte: firstDayOfMonth,
       lte: lastDayOfMonth,
@@ -822,16 +823,48 @@ export const getMonthlySavings = async (userId: string, month?: number, year?: n
   const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
   const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
 
-  // Get total income
-  const incomeResult = await prisma.transaction.aggregate({
-    where: {
-      userId,
-      type: 'INCOME',
-      date: {
-        gte: firstDayOfMonth,
-        lte: lastDayOfMonth,
+  // Find categories to exclude from income
+  const [cobroPrestamoCategory, cobroDeudaCategory] = await Promise.all([
+    prisma.categoryTemplate.findFirst({
+      where: {
+        name: 'Cobro de préstamo',
+        type: 'INCOME',
       },
+    }),
+    prisma.categoryTemplate.findFirst({
+      where: {
+        name: 'Cobro de deuda',
+        type: 'INCOME',
+      },
+    }),
+  ]);
+
+  // Build where clause for income
+  const incomeWhere: any = {
+    userId,
+    type: 'INCOME',
+    date: {
+      gte: firstDayOfMonth,
+      lte: lastDayOfMonth,
     },
+  };
+
+  // Exclude loan repayments and debt collections (shared expense settlements) from income
+  const categoriesToExclude = [];
+  if (cobroPrestamoCategory) {
+    categoriesToExclude.push(cobroPrestamoCategory.id);
+  }
+  if (cobroDeudaCategory) {
+    categoriesToExclude.push(cobroDeudaCategory.id);
+  }
+
+  if (categoriesToExclude.length > 0) {
+    incomeWhere.categoryId = { notIn: categoriesToExclude };
+  }
+
+  // Get total income (excluding loan repayments and shared expense settlements)
+  const incomeResult = await prisma.transaction.aggregate({
+    where: incomeWhere,
     _sum: {
       amount: true,
     },

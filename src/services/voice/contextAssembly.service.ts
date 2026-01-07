@@ -17,12 +17,9 @@ export class ContextAssemblyService {
 
         if (!user) throw new Error('User not found');
 
-        // 1. Get Categories (Templates + User Overrides that are active)
+        // 1. Get ALL Categories (Templates + User Overrides)
+        // We remove the parentTemplateId: null filter to allow the AI to see specific subcategories (e.g. "Cafetería")
         const categoryTemplates = await prisma.categoryTemplate.findMany({
-            where: { parentTemplateId: null }, // Start with top-level or fetch all flattening names? 
-            // For simplicity in V1, let's fetch all active overrides or templates.
-            // Actually, better to fetch what the user sees. 
-            // Simplified approach: Get all Category Templates names + User Overrides names.
             select: { name: true }
         });
 
@@ -54,10 +51,18 @@ export class ContextAssemblyService {
         });
         const accountNames = accounts.map(a => `${a.name} (${a.type})`);
 
+        // 4. Get User Tags
+        const tags = await prisma.tag.findMany({
+            where: { userId },
+            select: { name: true }
+        });
+        const tagNames = tags.map(t => t.name);
+
         return {
             currency_preference: user.currency,
             active_categories: [...new Set(categories)], // Dedup
             recent_payees: recentPayees.slice(0, 20), // Top 20
+            available_tags: tagNames,
             common_accounts: accountNames
         };
     }

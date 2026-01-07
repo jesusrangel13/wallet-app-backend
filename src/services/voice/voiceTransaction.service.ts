@@ -3,6 +3,7 @@ import { ContextAssemblyService } from './contextAssembly.service';
 import { SmartMatcherService } from './smartMatcher.service';
 import currency from 'currency.js';
 const Sugar = require('sugar-date');
+require('sugar-date/locales/es'); // Import Spanish locale
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const contextService = new ContextAssemblyService();
@@ -20,11 +21,16 @@ interface ParsedResult {
     resolvedCategoryId?: string;
     resolvedAccountId?: string;
     accountName?: string;
+    tags?: string[];
+    resolvedTagIds?: string[];
 }
 
 export class VoiceTransactionService {
 
     async parseTransaction(userId: string, text: string): Promise<ParsedResult> {
+        // Set locale to Spanish for this request
+        Sugar.Date.setLocale('es');
+
         // 1. Get Context (Resilient)
         let context: any;
         try {
@@ -35,7 +41,8 @@ export class VoiceTransactionService {
                 current_date: new Date().toISOString(),
                 currency_preference: 'USD', // Fallback
                 categories: [],
-                recent_payees: []
+                recent_payees: [],
+                available_tags: []
             };
         }
 
@@ -46,7 +53,9 @@ export class VoiceTransactionService {
         let resolvedDate = new Date();
         if (aiResponse.date_expression) {
             // Use Sugar Date to parse natural language dates (e.g. "ayer", "el viernes")
-            const parsed = Sugar.Date.create(aiResponse.date_expression);
+            // "past: true" preference ensures "Friday" means "Last Friday" if ambiguous, 
+            // though Sugar handles "last friday" explicitly.
+            const parsed = Sugar.Date.create(aiResponse.date_expression, { from: new Date() });
             if (Sugar.Date.isValid(parsed)) {
                 resolvedDate = parsed;
             }
@@ -54,6 +63,7 @@ export class VoiceTransactionService {
 
         let resolvedCategoryId = undefined;
         let resolvedAccountId = undefined;
+        let resolvedTagIds: string[] = [];
 
         // Resolve Category
         if (aiResponse.category) {
@@ -79,6 +89,15 @@ export class VoiceTransactionService {
             }
         }
 
+        // Resolve Tags
+        if (aiResponse.tags && Array.isArray(aiResponse.tags)) {
+            try {
+                resolvedTagIds = await smartMatcher.matchTags(userId, aiResponse.tags);
+            } catch (error) {
+                console.warn("⚠️ Failed to resolve tags via SmartMatcher. Ignoring.", error);
+            }
+        }
+
         return {
             amount: aiResponse.amount,
             currency: aiResponse.currency || context.currency_preference,
@@ -91,7 +110,10 @@ export class VoiceTransactionService {
 
             date: resolvedDate,
             confidence: aiResponse.confidence,
-            originalText: text
+            originalText: text,
+
+            tags: aiResponse.tags || [],
+            resolvedTagIds: resolvedTagIds
         };
     }
 
@@ -101,18 +123,25 @@ export class VoiceTransactionService {
                 messages: [
                     {
                         role: "system",
-                        content: `You are a financial transaction parser. Extract structured data from the user input.
+                        content: `You are a financial transaction parser. Extract structured data from the user input (in Spanish).
                     
                     User Context:
                     ${JSON.stringify(context)}
+                    
+                    Instructions:
+                    1. **Payee/Merchant**: actively extract the merchant name. Look for patterns like "en Starbucks", "de Amazon", "a Juan". If user says "compré un café en Starbucks", merchant is "Starbucks", description/category hint is "café".
+                    2. **Tags**: Match against 'available_tags' or extract hashtags like "#viaje". Return as array of strings.
+                    3. **Date**: Extract time reference relative to ${context.current_date}. Return "ayer", "hace 3 días", "el viernes pasado" exactly as captured or normalized to a string SugarDate can parse in Spanish.
+                    4. **Category**: Try to match specific subcategories in 'active_categories' (e.g. use "Cafetería" instead of just "Comida").
                     
                     Return a JSON object with:
                     - amount: number
                     - currency: string (ISO code)
                     - merchant: string (or null)
-                    - category: string (best guess based on input or active_categories)
-                    - account_source: string (source account mentioned e.g. "santander", "cash", or null)
-                    - date_expression: string (extract time reference like "ayer", "hoy", "last friday", or null if not present)
+                    - category: string (best guess)
+                    - account_source: string (source account mentioned or null)
+                    - date_expression: string (time reference or null)
+                    - tags: string[] (array of strings)
                     - confidence: number (0.0 to 1.0)
                     
                     Respond ONLY with valid JSON.`
@@ -122,7 +151,7 @@ export class VoiceTransactionService {
                         content: text
                     }
                 ],
-                model: "llama-3.3-70b-versatile", // Updated from decommissioned llama3-70b-8192
+                model: "llama-3.3-70b-versatile",
                 temperature: 0,
                 response_format: { type: "json_object" }
             });

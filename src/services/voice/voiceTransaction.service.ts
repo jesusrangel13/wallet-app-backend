@@ -14,6 +14,7 @@ interface ParsedResult {
     amount: number;
     currency: string;
     merchant: string | null;
+    description: string | null; // Added description
     category: string | null;
     date: Date;
     confidence: number;
@@ -102,6 +103,7 @@ export class VoiceTransactionService {
             amount: aiResponse.amount,
             currency: aiResponse.currency || context.currency_preference,
             merchant: aiResponse.merchant,
+            description: aiResponse.description || aiResponse.category, // Fallback to category
             category: aiResponse.category,  // Raw category from AI
             resolvedCategoryId: resolvedCategoryId, // Real DB ID
 
@@ -129,15 +131,17 @@ export class VoiceTransactionService {
                     ${JSON.stringify(context)}
                     
                     Instructions:
-                    1. **Payee/Merchant**: actively extract the merchant name. Look for patterns like "en Starbucks", "de Amazon", "a Juan". If user says "compré un café en Starbucks", merchant is "Starbucks", description/category hint is "café".
-                    2. **Tags**: Match against 'available_tags' or extract hashtags like "#viaje". Return as array of strings.
-                    3. **Date**: Extract time reference relative to ${context.current_date}. Return "ayer", "hace 3 días", "el viernes pasado" exactly as captured or normalized to a string SugarDate can parse in Spanish.
-                    4. **Category**: Try to match specific subcategories in 'active_categories' (e.g. use "Cafetería" instead of just "Comida").
+                    1. **Description**: What was bought? (e.g. "Frutas", "Café"). Extract this separately from merchant.
+                    2. **Payee/Merchant**: Where was it bought? (e.g. "Feria", "Starbucks", "Jumbo"). Look for "en [Place]", "de [Brand]".
+                    3. **Tags**: Match against 'available_tags' or extract hashtags like "#viaje". Return as array of strings.
+                    4. **Date**: Extract time reference relative to ${context.current_date}. Return "ayer", "hace 3 días", "el viernes pasado" exactly as captured or normalized to a string SugarDate can parse in Spanish.
+                    5. **Category**: Try to match specific subcategories in 'active_categories' (e.g. use "Cafetería" instead of just "Comida").
                     
                     Return a JSON object with:
                     - amount: number
                     - currency: string (ISO code)
                     - merchant: string (or null)
+                    - description: string (Item bought)
                     - category: string (best guess)
                     - account_source: string (source account mentioned or null)
                     - date_expression: string (time reference or null)

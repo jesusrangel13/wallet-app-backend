@@ -22,8 +22,8 @@ async function testVoiceParsing() {
     const result1 = await voiceService.parseTransaction(user.id, text1);
     console.log("Result:", JSON.stringify(result1, null, 2));
 
-    // Test Case 2: Date (Ayer)
-    const text2 = "Ayer compré pan en el supermercado por 2000";
+    // Test Case 2: Date (Ayer) + Description + Merchant/Category Match
+    const text2 = "Ayer compré frutas en la feria por 10000";
     console.log(`\n--- Test 2: "${text2}" ---`);
     const result2 = await voiceService.parseTransaction(user.id, text2);
     console.log("Result:", JSON.stringify(result2, null, 2));

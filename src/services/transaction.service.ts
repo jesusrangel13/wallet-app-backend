@@ -8,6 +8,7 @@ import {
   validateCategoryId,
   searchCategoriesByName,
 } from './categoryResolver.service';
+import { updateMonthlySummary } from './summary.service';
 
 // Template-based category system is now the default system
 const prisma = new PrismaClient();
@@ -212,6 +213,9 @@ export const createTransaction = async (
       matcher.learn(userId, data.payee!, data.categoryId!, data.payee);
     }).catch(err => console.error("Failed to trigger smart learning", err));
   }
+
+  // Update monthly summary
+  await updateMonthlySummary(userId, result.date);
 
   return { ...result, category: categoryInfo };
 };
@@ -662,6 +666,16 @@ export const updateTransaction = async (
   // Resolve category information
   const category = await resolveCategoryById(transaction.categoryId, userId);
 
+  // Update monthly summaries
+  // Update for the old date
+  if (existingTransaction.date) {
+    await updateMonthlySummary(userId, existingTransaction.date);
+  }
+  // Update for the new date (if different)
+  if (transaction.date && transaction.date.getTime() !== existingTransaction.date.getTime()) {
+    await updateMonthlySummary(userId, transaction.date);
+  }
+
   return { ...transaction, category };
 };
 
@@ -692,6 +706,9 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
         },
         paidBy: {
           select: { id: true, email: true, name: true },
+        },
+        participants: {
+          select: { userId: true },
         },
       },
     });
@@ -730,7 +747,7 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
     }
 
     // Use database transaction for atomicity
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       // 1. Revert balances for ALL linked transactions
       for (const trans of sharedExpense.transactions) {
         await updateAccountBalance(
@@ -771,8 +788,28 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
       return {
         message: 'Gasto compartido y todas las transacciones vinculadas eliminadas exitosamente',
         deletedTransactions: sharedExpense.transactions.length,
+        participants: sharedExpense.participants, // Pass participants to outer scope
+        date: sharedExpense.date, // Pass date to outer scope
       };
     });
+
+    // Update monthly summaries for all participants (outside of transaction)
+    // The previous transaction block returns the participants and date needed
+    if (result && 'participants' in result) {
+      const typedResult = result as any; // Type assertion needed or better typing
+      const participants = typedResult.participants;
+      const expenseDate = typedResult.date;
+
+      for (const p of participants) {
+        await updateMonthlySummary(p.userId, expenseDate);
+      }
+      // Also update the payer (if not in participants list, though usually is)
+      if (!participants.find((p: any) => p.userId === sharedExpense.paidByUserId)) {
+        await updateMonthlySummary(sharedExpense.paidByUserId, expenseDate);
+      }
+    }
+
+    return result;
   }
 
   // If NOT a shared expense, continue with normal deletion logic
@@ -800,6 +837,9 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
   await prisma.transaction.delete({
     where: { id: transactionId },
   });
+
+  // Update monthly summary
+  await updateMonthlySummary(userId, transaction.date);
 
   return { message: 'Transaction deleted successfully' };
 };

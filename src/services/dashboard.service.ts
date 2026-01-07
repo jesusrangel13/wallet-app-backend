@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { resolveCategoriesBatch } from './categoryResolver.service';
+import { updateMonthlySummary } from './summary.service';
 
 const prisma = new PrismaClient();
 
@@ -731,45 +732,26 @@ export const getPersonalExpenses = async (userId: string, month?: number, year?:
   const now = new Date();
   const targetMonth = month !== undefined ? month : now.getMonth();
   const targetYear = year !== undefined ? year : now.getFullYear();
-  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
-  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
+  const monthDate = new Date(targetYear, targetMonth);
 
-  // Find "Inversiones" category to exclude it
-  const inversionesCategory = await prisma.categoryTemplate.findFirst({
+  // Try to get from MonthlySummary first
+  let summary = await prisma.monthlySummary.findUnique({
     where: {
-      name: 'Inversiones',
-      type: 'INCOME',
-      parentTemplateId: null
-    }
+      userId_month_year: {
+        userId,
+        month: targetMonth + 1, // DB uses 1-based index
+        year: targetYear,
+      },
+    },
   });
 
-  // Build where clause
-  const where: any = {
-    userId,
-    type: 'EXPENSE',
-    sharedExpenseId: null, // NOT shared
-    loanId: null, // NOT loan disbursements
-    date: {
-      gte: firstDayOfMonth,
-      lte: lastDayOfMonth,
-    },
-  };
-
-  // Exclude "Inversiones" category if it exists
-  if (inversionesCategory) {
-    where.categoryId = { not: inversionesCategory.id };
+  if (!summary) {
+    // Fallback: Calculate and cache
+    summary = await updateMonthlySummary(userId, new Date(targetYear, targetMonth, 1)) as any;
   }
 
-  const result = await prisma.transaction.aggregate({
-    where,
-    _sum: {
-      amount: true,
-    },
-  });
-
-  const monthDate = new Date(targetYear, targetMonth);
   return {
-    total: Number(result._sum.amount || 0),
+    total: Number(summary?.personalExpense || 0),
     month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
   };
 };
@@ -785,14 +767,9 @@ export const getSharedExpensesTotal = async (userId: string, month?: number, yea
   const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
   const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
 
-  // Optimization: Use aggregation to sum amountOwed directly
-  const result = await prisma.expenseParticipant.aggregate({
-    _sum: {
-      amountOwed: true,
-    },
-    _count: {
-      expenseId: true,
-    },
+  // We still need the count, which is not in summary. 
+  // Optimization: Just count, avoid summing.
+  const count = await prisma.expenseParticipant.count({
     where: {
       userId,
       expense: {
@@ -804,10 +781,25 @@ export const getSharedExpensesTotal = async (userId: string, month?: number, yea
     },
   });
 
+  // Try to get total from MonthlySummary
+  let summary = await prisma.monthlySummary.findUnique({
+    where: {
+      userId_month_year: {
+        userId,
+        month: targetMonth + 1,
+        year: targetYear,
+      },
+    },
+  });
+
+  if (!summary) {
+    summary = await updateMonthlySummary(userId, new Date(targetYear, targetMonth, 1)) as any;
+  }
+
   const monthDate = new Date(targetYear, targetMonth);
   return {
-    total: Number(result._sum.amountOwed || 0),
-    count: result._count.expenseId,
+    total: Number(summary?.sharedExpense || 0),
+    count,
     month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
   };
 };
@@ -820,80 +812,36 @@ export const getMonthlySavings = async (userId: string, month?: number, year?: n
   const now = new Date();
   const targetMonth = month !== undefined ? month : now.getMonth();
   const targetYear = year !== undefined ? year : now.getFullYear();
-  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
-  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
+  const monthDate = new Date(targetYear, targetMonth);
 
-  // Find categories to exclude from income
-  const [cobroPrestamoCategory, cobroDeudaCategory] = await Promise.all([
-    prisma.categoryTemplate.findFirst({
-      where: {
-        name: 'Cobro de préstamo',
-        type: 'INCOME',
+  // Try to get from MonthlySummary first
+  let summary = await prisma.monthlySummary.findUnique({
+    where: {
+      userId_month_year: {
+        userId,
+        month: targetMonth + 1,
+        year: targetYear,
       },
-    }),
-    prisma.categoryTemplate.findFirst({
-      where: {
-        name: 'Cobro de deuda',
-        type: 'INCOME',
-      },
-    }),
-  ]);
-
-  // Build where clause for income
-  const incomeWhere: any = {
-    userId,
-    type: 'INCOME',
-    date: {
-      gte: firstDayOfMonth,
-      lte: lastDayOfMonth,
-    },
-  };
-
-  // Exclude loan repayments and debt collections (shared expense settlements) from income
-  const categoriesToExclude = [];
-  if (cobroPrestamoCategory) {
-    categoriesToExclude.push(cobroPrestamoCategory.id);
-  }
-  if (cobroDeudaCategory) {
-    categoriesToExclude.push(cobroDeudaCategory.id);
-  }
-
-  if (categoriesToExclude.length > 0) {
-    incomeWhere.categoryId = { notIn: categoriesToExclude };
-  }
-
-  // Get total income (excluding loan repayments and shared expense settlements)
-  const incomeResult = await prisma.transaction.aggregate({
-    where: incomeWhere,
-    _sum: {
-      amount: true,
     },
   });
 
-  const totalIncome = Number(incomeResult._sum.amount || 0);
+  if (!summary) {
+    summary = await updateMonthlySummary(userId, new Date(targetYear, targetMonth, 1)) as any;
+  }
 
-  // Get personal expenses (excluding shared and transfers)
-  const personalExpensesData = await getPersonalExpenses(userId, month, year);
-  const personalExpenses = personalExpensesData.total;
-
-  // Get shared expenses (user's share)
-  const sharedExpensesData = await getSharedExpensesTotal(userId, month, year);
-  const sharedExpenses = sharedExpensesData.total;
-
-  // Calculate savings
-  const totalExpenses = personalExpenses + sharedExpenses;
-  const savings = totalIncome - totalExpenses;
+  const savings = Number(summary?.savings || 0);
+  const totalIncome = Number(summary?.income || 0);
+  const totalExpenses = Number(summary?.expense || 0);
   const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
 
-  const monthDate = new Date(targetYear, targetMonth);
   return {
     savings,
     savingsRate,
     income: totalIncome,
     expenses: totalExpenses,
     breakdown: {
-      personal: personalExpenses,
-      shared: sharedExpenses,
+      personal: Number(summary?.personalExpense || 0),
+      shared: Number(summary?.sharedExpense || 0),
     },
     month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
   };

@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import * as notificationService from './notification.service';
+import { updateMonthlySummary } from './summary.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 
 const prisma = new PrismaClient();
@@ -182,6 +183,38 @@ export const createSharedExpense = async (
     );
 
   await Promise.all(notificationPromises);
+
+
+
+  // Update monthly summaries for all participants and the payer
+  const updatePromises = expense.participants.map(p => updateMonthlySummary(p.userId, expense.date));
+  // Payer might not be in participants list (though logic suggests they usually aren't as "participant" unless split logic adds them. My summary logic calculates income/expense. Payer gets nothing changed unless they are partially liable?)
+  // Wait, sharedExpense logic: PaidBy pays 100. Participates 50.
+  // Payer needs update? Yes, because "Personal Expense" logic checks if transaction is linked to shared expense.
+  // If we create a shared expense, we link the transaction?
+  // NO. createSharedExpense does NOT create a Transaction record automatically here?
+  // Let's check `createSharedExpense`. It creates `SharedExpense`.
+  // Does it create a `Transaction`?
+  // No, it does NOT seem to create a Transaction in `sharedExpense.service.ts`.
+  // The user usually creates a Transaction manually OR the UI does it?
+  // Use case: I paid $100. I create a Shared Expense.
+  // Ideally, I should also have a Transaction record for that $100.
+  // If the backend doesn't create it, then `updateMonthlySummary` only sees the `SharedExpense`.
+  // My `updateMonthlySummary` logic:
+  // PersonalExpense: from `Transaction` table.
+  // SharedExpense: from `ExpenseParticipant`.
+  // IMPORTANT: If `SharedExpense` exists but NO `Transaction`, then:
+  // Payer: Income 0. Expense 0 (personal). Shared Portion (if participant) X.
+  // The $100 outflow is MISSING from "Cash Flow" or "Total Expense" if there is no Transaction!
+  // This seems to be a gap in the system logic or I assume Transaction exists.
+  // IF Transaction exists (created separately), then we need to update summary when SharedExpense changes because:
+  // 1. Participant amountOwed changes.
+  // 2. If we link Transaction later?
+  // Assuming simpler case: SharedExpense affects Participants.
+  // I will update all `participants` found in the expense.
+  // And `paidByUserId`.
+  if (expense.paidByUserId) updatePromises.push(updateMonthlySummary(expense.paidByUserId, expense.date));
+  await Promise.all(updatePromises);
 
   return expense;
 };
@@ -379,6 +412,36 @@ export const updateSharedExpense = async (
     );
 
   await Promise.all(notificationPromises);
+
+  await Promise.all(notificationPromises);
+
+  // Update monthly summaries
+  const updatePromises = updatedExpense.participants.map(p => updateMonthlySummary(p.userId, updatedExpense.date));
+  updatePromises.push(updateMonthlySummary(updatedExpense.paidByUserId, updatedExpense.date));
+  // Also update for OLD participants if any were removed?
+  // That's tricky. But `updateMonthlySummary` recalculates whole month.
+  // So if I update the month for the OLD date (if date changed) and NEW date.
+  // Logic here assumes date didn't change wildly.
+  // If participants were removed, we need to update THEIR summary too.
+  // But `updatedExpense.participants` only has CURRENT participants.
+  // I should have captured old participants?
+  // The code deletes existing participants (line 303).
+  // Ideally I should fetch old expense, get participants, and update them too.
+  // Existing code: `const expense = await prisma.sharedExpense.findFirst(...)`.
+  // I can use `expense.participants` from the top of the function.
+  // So:
+  const allUserIds = new Set<string>();
+  expense.participants.forEach(p => allUserIds.add(p.userId));
+  updatedExpense.participants.forEach(p => allUserIds.add(p.userId));
+  allUserIds.add(updatedExpense.paidByUserId);
+  allUserIds.add(expense.paidByUserId);
+
+  const uniqueUserIds = Array.from(allUserIds);
+  await Promise.all(uniqueUserIds.map(uid => updateMonthlySummary(uid, updatedExpense.date)));
+  // Note: if date changed, we should also update old date.
+  if (expense.date.getTime() !== updatedExpense.date.getTime()) {
+    await Promise.all(uniqueUserIds.map(uid => updateMonthlySummary(uid, expense.date)));
+  }
 
   return updatedExpense;
 };

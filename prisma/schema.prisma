@@ -40,6 +40,7 @@ model User {
   transactionPatterns           UserTransactionPattern[]
   dashboardPreference           UserDashboardPreference?
   defaultSharedExpenseAccount   Account?                  @relation("DefaultSharedExpenseAccount", fields: [defaultSharedExpenseAccountId], references: [id])
+  monthlySummaries              MonthlySummary[]
 
   @@map("users")
 }
@@ -491,4 +492,25 @@ model UserTransactionPattern {
   @@unique([userId, pattern])
   @@index([userId])
   @@map("user_transaction_patterns")
+}
+
+model MonthlySummary {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  month           Int
+  year            Int
+  message         String?
+  income          Decimal  @default(0) @db.Decimal(15, 2)
+  expense         Decimal  @default(0) @db.Decimal(15, 2)
+  personalExpense Decimal  @default(0) @map("personal_expense") @db.Decimal(15, 2)
+  sharedExpense   Decimal  @default(0) @map("shared_expense") @db.Decimal(15, 2)
+  savings         Decimal  @default(0) @db.Decimal(15, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, month, year])
+  @@index([userId])
+  @@map("monthly_summaries")
 }

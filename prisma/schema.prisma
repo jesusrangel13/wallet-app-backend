@@ -37,6 +37,7 @@ model User {
   tags                          Tag[]
   transactions                  Transaction[]
   categoryOverrides             UserCategoryOverride[]    @relation("UserCategoryOverrides")
+  transactionPatterns           UserTransactionPattern[]
   dashboardPreference           UserDashboardPreference?
   defaultSharedExpenseAccount   Account?                  @relation("DefaultSharedExpenseAccount", fields: [defaultSharedExpenseAccountId], references: [id])
 
@@ -473,4 +474,21 @@ enum NotificationType {
   SHARED_EXPENSE_CREATED
   GROUP_MEMBER_ADDED
   BALANCE_SETTLED
+}
+
+model UserTransactionPattern {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  pattern         String
+  resolvedCategoryId String? @map("resolved_category_id")
+  resolvedMerchant   String? @map("resolved_merchant")
+  confidence      Float    @default(1.0)
+  useCount        Int      @default(1) @map("use_count")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, pattern])
+  @@index([userId])
+  @@map("user_transaction_patterns")
 }

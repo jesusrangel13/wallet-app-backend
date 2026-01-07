@@ -25,6 +25,7 @@ import dashboardRoutes from './routes/dashboard.routes';
 import notificationRoutes from './routes/notification.routes';
 import dashboardPreferenceRoutes from './routes/dashboardPreference.routes';
 import loanRoutes from './routes/loan.routes';
+import voiceRoutes from './routes/voice.routes';
 import { CategoryTemplateService } from './services/categoryTemplate.service';
 
 // Load environment variables (via env.ts)
@@ -97,6 +98,7 @@ v1Router.use('/import', importRoutes);
 v1Router.use('/dashboard', dashboardRoutes);
 v1Router.use('/notifications', notificationRoutes);
 v1Router.use('/users', dashboardPreferenceRoutes); // Check if this conflicts with /users above. It seems to be dashboard preferences.
+v1Router.use('/voice', voiceRoutes);
 
 // Mount v1 router
 app.use('/api/v1', v1Router);

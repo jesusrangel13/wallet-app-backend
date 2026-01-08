@@ -63,7 +63,11 @@ export class ContextAssemblyService {
             active_categories: [...new Set(categories)], // Dedup
             recent_payees: recentPayees.slice(0, 20), // Top 20
             available_tags: tagNames,
-            common_accounts: accountNames
+            common_accounts: accountNames,
+            available_groups: (await prisma.groupMember.findMany({
+                where: { userId },
+                include: { group: { select: { name: true } } }
+            })).map(m => m.group.name)
         };
     }
 }

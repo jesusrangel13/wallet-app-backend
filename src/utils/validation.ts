@@ -140,7 +140,7 @@ export const createSharedExpenseSchema = z.object({
       percentage: z.number().min(0).max(100).optional(), // 0-100
       shares: z.number().int().positive().optional(),
     })
-  ),
+  ).optional(),
 });
 
 export const updateSharedExpenseSchema = createSharedExpenseSchema.partial();

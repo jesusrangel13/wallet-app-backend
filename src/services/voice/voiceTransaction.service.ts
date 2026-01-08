@@ -24,6 +24,8 @@ interface ParsedResult {
     accountName?: string;
     tags?: string[];
     resolvedTagIds?: string[];
+    groupName?: string | null;
+    resolvedGroupId?: string;
 }
 
 export class VoiceTransactionService {
@@ -99,6 +101,19 @@ export class VoiceTransactionService {
             }
         }
 
+        // Resolve Group
+        let resolvedGroupId = undefined;
+        if (aiResponse.group_name) {
+            try {
+                const match = await smartMatcher.matchGroup(userId, aiResponse.group_name);
+                if (match) {
+                    resolvedGroupId = match.id;
+                }
+            } catch (error) {
+                console.warn("⚠️ Failed to resolve group via SmartMatcher. Ignoring.", error);
+            }
+        }
+
         return {
             amount: aiResponse.amount,
             currency: aiResponse.currency || context.currency_preference,
@@ -115,7 +130,9 @@ export class VoiceTransactionService {
             originalText: text,
 
             tags: aiResponse.tags || [],
-            resolvedTagIds: resolvedTagIds
+            resolvedTagIds: resolvedTagIds,
+            groupName: aiResponse.group_name || null,
+            resolvedGroupId: resolvedGroupId
         };
     }
 
@@ -136,6 +153,7 @@ export class VoiceTransactionService {
                     3. **Tags**: Match against 'available_tags' or extract hashtags like "#viaje". Return as array of strings.
                     4. **Date**: Extract time reference relative to ${context.current_date}. Return "ayer", "hace 3 días", "el viernes pasado" exactly as captured or normalized to a string SugarDate can parse in Spanish.
                     5. **Category**: Try to match specific subcategories in 'active_categories' (e.g. use "Cafetería" instead of just "Comida").
+                    6. **Shared/Group**: Look for phrases like "del grupo [Group]", "compartido con [Group]", "compra de la [Group]", "para la [Group]", "en la [Group]". Match against 'available_groups'.
                     
                     Return a JSON object with:
                     - amount: number
@@ -146,6 +164,7 @@ export class VoiceTransactionService {
                     - account_source: string (source account mentioned or null)
                     - date_expression: string (time reference or null)
                     - tags: string[] (array of strings)
+                    - group_name: string (target group name if shared, or null)
                     - confidence: number (0.0 to 1.0)
                     
                     Respond ONLY with valid JSON.`

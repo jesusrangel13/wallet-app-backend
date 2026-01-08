@@ -238,4 +238,42 @@ export class SmartMatcherService {
 
         return [...new Set(matchedTagIds)]; // Unique IDs
     }
+
+    /**
+     * Fuzzy match group name
+     */
+    async matchGroup(userId: string, inputName: string): Promise<{ id: string, name: string, confidence: number } | null> {
+        if (!inputName) return null;
+        const normalizedInput = inputName.toLowerCase().trim();
+
+        // Fetch user groups
+        const userGroups = await prisma.groupMember.findMany({
+            where: { userId },
+            include: { group: { select: { id: true, name: true } } }
+        });
+
+        const groups = userGroups.map(m => m.group);
+
+        let bestMatch = null;
+        let minDistance = Infinity;
+
+        for (const group of groups) {
+            const dist = this.levenshtein(normalizedInput, group.name.toLowerCase());
+            if (dist < minDistance) {
+                minDistance = dist;
+                bestMatch = group;
+            }
+        }
+
+        if (!bestMatch) return null;
+
+        const maxLength = Math.max(normalizedInput.length, bestMatch.name.length);
+        const confidence = 1 - (minDistance / maxLength);
+
+        if (confidence > 0.4) {
+            return { id: bestMatch.id, name: bestMatch.name, confidence };
+        }
+
+        return null;
+    }
 }

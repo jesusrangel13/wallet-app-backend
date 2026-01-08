@@ -37,6 +37,16 @@ async function testVoiceParsing() {
     // Explicitly check for tag resolution if user has tags
     // Create a dummy tag if not exists for testing?
     // Let's assume user might have tags or AI might extract '#vacaciones' even if not matched.
+    // Test Case 4: Shared Expense for "Familia"
+    const text4 = "Compras del super por 50000 con la cuenta lider para el grupo familia";
+    console.log(`\n--- Test 4: "${text4}" ---`);
+    const result4 = await voiceService.parseTransaction(user.id, text4);
+    console.log("Result:", JSON.stringify(result4, null, 2));
+    // Test Case 5: User Reproduction - "gasto compartido en la casa"
+    const text5 = "ayer compré en el líder frutas y cosas para la casa pagué $35,500 y esto lo pagué con la tarjeta líder bci y debe ser un gasto compartido en la casa";
+    console.log(`\n--- Test 5: "${text5}" ---`);
+    const result5 = await voiceService.parseTransaction(user.id, text5);
+    console.log("Result:", JSON.stringify(result5, null, 2));
 }
 
 testVoiceParsing().catch(console.error).finally(() => prisma.$disconnect());

@@ -22,7 +22,7 @@ interface CreateSharedExpenseData {
   categoryId?: string;
   receiptUrl?: string;
   splitType: 'EQUAL' | 'PERCENTAGE' | 'EXACT' | 'SHARES';
-  participants: ParticipantData[];
+  participants?: ParticipantData[];
 }
 
 export const createSharedExpense = async (
@@ -41,8 +41,50 @@ export const createSharedExpense = async (
     throw new AppError(ErrorCodes.SHARED_EXPENSE_NOT_MEMBER, 403);
   }
 
+  // If participants are not provided, use Group Default Settings
+  let finalParticipants = data.participants;
+  let finalSplitType = data.splitType;
+
+  if (!finalParticipants || finalParticipants.length === 0) {
+    // Fetch group details with default settings
+    const groupDefaults = await prisma.group.findUnique({
+      where: { id: data.groupId },
+      select: {
+        defaultSplitType: true,
+        defaultSplitSettings: true,
+        members: { select: { userId: true } }
+      }
+    });
+
+    if (groupDefaults) {
+      // Use group default split type if available, otherwise keep EQUAL default from request/schema
+      if (groupDefaults.defaultSplitType) {
+        finalSplitType = groupDefaults.defaultSplitType;
+      }
+
+      // Map members to participants with default values
+      finalParticipants = groupDefaults.members.map(member => {
+        const settings = groupDefaults.defaultSplitSettings.find(s => s.userId === member.userId);
+        return {
+          userId: member.userId,
+          percentage: settings?.percentage ? Number(settings.percentage) : undefined,
+          shares: settings?.shares || undefined,
+          // amountOwed/exactAmount is usually per-transaction, but could be defaulted if constant?
+          // For now, only percentage/shares make sense as comprehensive defaults.
+        };
+      });
+    } else {
+      // Fallback if group not found (shouldn't happen given prior checks)
+      const allMembers = await prisma.groupMember.findMany({
+        where: { groupId: data.groupId },
+        select: { userId: true }
+      });
+      finalParticipants = allMembers.map(m => ({ userId: m.userId }));
+    }
+  }
+
   // Verify all participants are members
-  const participantIds = data.participants.map((p) => p.userId);
+  const participantIds = finalParticipants.map((p) => p.userId);
   const members = await prisma.groupMember.findMany({
     where: {
       groupId: data.groupId,
@@ -57,42 +99,45 @@ export const createSharedExpense = async (
   // Calculate amounts based on split type
   let participantsWithAmounts: Array<{ userId: string; amountOwed: number }> = [];
 
-  if (data.splitType === 'EQUAL') {
-    const amountPerPerson = data.amount / data.participants.length;
-    participantsWithAmounts = data.participants.map((p) => ({
+  // Use finalParticipants for calculation
+  const calculationParticipants = finalParticipants;
+
+  if (finalSplitType === 'EQUAL') {
+    const amountPerPerson = data.amount / calculationParticipants.length;
+    participantsWithAmounts = calculationParticipants.map((p) => ({
       userId: p.userId,
       amountOwed: amountPerPerson,
     }));
-  } else if (data.splitType === 'PERCENTAGE') {
-    const totalPercentage = data.participants.reduce(
+  } else if (finalSplitType === 'PERCENTAGE') {
+    const totalPercentage = calculationParticipants.reduce(
       (sum, p) => sum + (p.percentage || 0),
       0
     );
     if (Math.abs(totalPercentage - 100) > 0.01) {
       throw new AppError(ErrorCodes.SHARED_EXPENSE_PERCENTAGE_INVALID, 400);
     }
-    participantsWithAmounts = data.participants.map((p) => ({
+    participantsWithAmounts = calculationParticipants.map((p) => ({
       userId: p.userId,
       amountOwed: (data.amount * (p.percentage || 0)) / 100,
     }));
-  } else if (data.splitType === 'EXACT') {
-    const totalAmount = data.participants.reduce(
+  } else if (finalSplitType === 'EXACT') {
+    const totalAmount = calculationParticipants.reduce(
       (sum, p) => sum + (p.amountOwed || 0),
       0
     );
     if (Math.abs(totalAmount - data.amount) > 0.01) {
       throw new AppError(ErrorCodes.SHARED_EXPENSE_EXACT_AMOUNT_INVALID, 400);
     }
-    participantsWithAmounts = data.participants.map((p) => ({
+    participantsWithAmounts = calculationParticipants.map((p) => ({
       userId: p.userId,
       amountOwed: p.amountOwed || 0,
     }));
-  } else if (data.splitType === 'SHARES') {
-    const totalShares = data.participants.reduce(
+  } else if (finalSplitType === 'SHARES') {
+    const totalShares = calculationParticipants.reduce(
       (sum, p) => sum + (p.shares || 1),
       0
     );
-    participantsWithAmounts = data.participants.map((p) => ({
+    participantsWithAmounts = calculationParticipants.map((p) => ({
       userId: p.userId,
       amountOwed: (data.amount * (p.shares || 1)) / totalShares,
     }));
@@ -137,7 +182,7 @@ export const createSharedExpense = async (
       description: data.description,
       categoryId: data.categoryId,
       receiptUrl: data.receiptUrl,
-      splitType: data.splitType,
+      splitType: finalSplitType,
       participants: {
         create: participantsWithPaymentStatus,
       },

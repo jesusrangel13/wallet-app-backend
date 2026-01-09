@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
 import { specs as swaggerSpecs } from './config/swagger';
 import { requestLogger } from './middleware/requestLogger';
+import { sanitizeMiddleware } from './middleware/sanitize';
 import healthRoutes from './routes/health.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { notFoundHandler } from './middleware/notFoundHandler';
@@ -66,6 +67,10 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Input sanitization - Applied globally to prevent XSS attacks
+// Sanitizes req.body, req.query, and req.params
+app.use(sanitizeMiddleware);
 
 // Health check
 app.use('/health', healthRoutes);

@@ -1,6 +1,7 @@
 import { sign, verify, Secret } from 'jsonwebtoken';
+import { env } from '../config/env';
 
-const JWT_SECRET: Secret = process.env.JWT_SECRET || 'your-secret-key';
+const JWT_SECRET: Secret = env.JWT_SECRET;
 
 export interface TokenPayload {
   userId: string;
@@ -12,7 +13,7 @@ export const generateToken = (userId: string): string => {
   return sign(
     { userId },
     JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' } as any
+    { expiresIn: env.JWT_EXPIRES_IN } as any
   );
 };
 

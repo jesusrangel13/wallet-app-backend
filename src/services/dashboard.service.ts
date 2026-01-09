@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import { resolveCategoriesBatch } from './categoryResolver.service';
 import { updateMonthlySummary } from './summary.service';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 export const getCashFlow = async (userId: string, months: number = 6, endDate?: Date) => {
   const end = endDate || new Date();

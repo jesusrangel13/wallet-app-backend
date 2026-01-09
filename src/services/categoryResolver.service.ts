@@ -6,9 +6,7 @@
  * This service replaces the legacy Category model's Prisma relations
  */
 
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 export interface CategoryInfo {
   id: string;

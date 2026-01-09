@@ -6,9 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals'
 import { UserCategoryService } from '../userCategory.service'
 import { CategoryTemplateService } from '../categoryTemplate.service'
-import { PrismaClient } from '@prisma/client'
-
-const prisma = new PrismaClient()
+import { prisma } from '../../utils/prisma'
 const testUserId = 'test-user-' + Date.now()
 
 describe('UserCategoryService', () => {

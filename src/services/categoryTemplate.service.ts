@@ -1,9 +1,8 @@
-import { PrismaClient, TransactionType } from '@prisma/client';
+import { TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import { DEFAULT_CATEGORY_TEMPLATES } from '../data/categoryTemplates';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 // Cache para templates (TTL: 24 horas)
 const CACHE_KEY = 'category_templates';

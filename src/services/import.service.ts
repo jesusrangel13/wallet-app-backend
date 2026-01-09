@@ -1,11 +1,9 @@
-import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import { resolveCategoriesBatch } from './categoryResolver.service';
 import { createTransaction } from './transaction.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 interface ImportTransactionData {
   row: number;

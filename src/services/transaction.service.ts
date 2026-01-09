@@ -1,4 +1,4 @@
-import { PrismaClient, TransactionType } from '@prisma/client';
+import { TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import { UserCategoryService } from './userCategory.service';
@@ -9,9 +9,9 @@ import {
   searchCategoriesByName,
 } from './categoryResolver.service';
 import { updateMonthlySummary } from './summary.service';
+import { prisma } from '../utils/prisma';
 
 // Template-based category system is now the default system
-const prisma = new PrismaClient();
 
 interface CreateTransactionData {
   accountId: string;

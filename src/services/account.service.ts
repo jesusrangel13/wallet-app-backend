@@ -1,9 +1,8 @@
-import { PrismaClient, AccountType } from '@prisma/client';
+import { AccountType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import { PaginationParams, calculatePagination, calculateSkip, PaginatedResponse } from '../@types/pagination.types';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 // Generate random hex color from predefined palette
 const generateRandomColor = (): string => {

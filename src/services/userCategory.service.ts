@@ -1,9 +1,8 @@
-import { PrismaClient, TransactionType } from '@prisma/client';
+import { TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import { CategoryTemplateService } from './categoryTemplate.service';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 export interface MergedCategory {
   id: string; // ID del override o template

@@ -2,6 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { ErrorCodes, type ErrorCode } from '../constants/errorCodes';
 import logger from '../utils/logger';
 
+interface PrismaError extends Error {
+  code?: string;
+  meta?: Record<string, unknown>;
+}
+
 export class AppError extends Error {
   statusCode: number;
   isOperational: boolean;
@@ -33,7 +38,8 @@ export const errorHandler = (
 
   // Prisma errors
   if (err.name === 'PrismaClientKnownRequestError') {
-    logger.error('Prisma Error', { code: (err as any).code, meta: (err as any).meta });
+    const prismaError = err as PrismaError;
+    logger.error('Prisma Error', { code: prismaError.code, meta: prismaError.meta });
     return res.status(400).json({
       status: 'error',
       errorCode: ErrorCodes.DATABASE_ERROR,

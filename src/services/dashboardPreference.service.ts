@@ -1,4 +1,5 @@
 import { prisma } from '../utils/prisma'
+import { Prisma } from '@prisma/client'
 
 export interface WidgetConfig {
   id: string // unique widget instance ID
@@ -35,7 +36,7 @@ class DashboardPreferenceService {
    * If none exist, create default preferences
    */
   async getPreferences(userId: string): Promise<DashboardPreference> {
-    let preference = await (prisma.userDashboardPreference as any).findUnique({
+    let preference = await prisma.userDashboardPreference.findUnique({
       where: { userId },
     })
 
@@ -94,13 +95,13 @@ class DashboardPreferenceService {
       { i: 'widget-11', x: 0, y: 10, w: 4, h: 2, minW: 2, minH: 1 },
     ]
 
-    const preference = (await (prisma.userDashboardPreference as any).create({
+    const preference = await prisma.userDashboardPreference.create({
       data: {
         userId,
-        widgets: defaultWidgets,
-        layout: defaultLayout,
+        widgets: defaultWidgets as unknown as Prisma.InputJsonValue,
+        layout: defaultLayout as unknown as Prisma.InputJsonValue,
       },
-    })) as any
+    })
 
     return {
       id: preference.id,
@@ -120,19 +121,19 @@ class DashboardPreferenceService {
     widgets: WidgetConfig[],
     layout: GridLayoutItem[]
   ): Promise<DashboardPreference> {
-    const preference = (await (prisma.userDashboardPreference as any).upsert({
+    const preference = await prisma.userDashboardPreference.upsert({
       where: { userId },
       update: {
-        widgets,
-        layout,
+        widgets: widgets as unknown as Prisma.InputJsonValue,
+        layout: layout as unknown as Prisma.InputJsonValue,
         updatedAt: new Date(),
       },
       create: {
         userId,
-        widgets,
-        layout,
+        widgets: widgets as unknown as Prisma.InputJsonValue,
+        layout: layout as unknown as Prisma.InputJsonValue,
       },
-    })) as any
+    })
 
     return {
       id: preference.id,
@@ -148,7 +149,7 @@ class DashboardPreferenceService {
    * Reset user's dashboard to default preferences
    */
   async resetToDefaults(userId: string): Promise<DashboardPreference> {
-    await (prisma.userDashboardPreference as any).deleteMany({
+    await prisma.userDashboardPreference.deleteMany({
       where: { userId },
     })
 

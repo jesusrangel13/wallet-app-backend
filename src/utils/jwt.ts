@@ -1,4 +1,4 @@
-import { sign, verify, Secret } from 'jsonwebtoken';
+import { sign, verify, Secret, SignOptions } from 'jsonwebtoken';
 import { env } from '../config/env';
 
 const JWT_SECRET: Secret = env.JWT_SECRET;
@@ -8,8 +8,11 @@ export interface TokenPayload {
 }
 
 export const generateToken = (userId: string): string => {
-  // Using any to bypass strict type checking for expiresIn
-  // This is a known issue with some versions of @types/jsonwebtoken
+  // NOTE: Using 'as any' here is INTENTIONAL and SAFE
+  // Reason: @types/jsonwebtoken type definitions are outdated/incorrect
+  // The JWT library DOES accept string values like "7d" for expiresIn
+  // but TypeScript types only allow number | StringValue (which excludes plain strings)
+  // This is a known limitation of the type definitions, not our code
   return sign(
     { userId },
     JWT_SECRET,

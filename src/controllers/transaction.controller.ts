@@ -48,7 +48,7 @@ export const getTransactions = async (
 
     const filters = {
       accountId: req.query.accountId as string,
-      type: req.query.type as any,
+      type: req.query.type as 'EXPENSE' | 'INCOME' | 'TRANSFER' | undefined,
       categoryId: req.query.categoryId as string,
       startDate: req.query.startDate as string,
       endDate: req.query.endDate as string,

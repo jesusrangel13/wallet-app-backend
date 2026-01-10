@@ -797,15 +797,14 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
     // Update monthly summaries for all participants (outside of transaction)
     // The previous transaction block returns the participants and date needed
     if (result && 'participants' in result) {
-      const typedResult = result as any; // Type assertion needed or better typing
-      const participants = typedResult.participants;
-      const expenseDate = typedResult.date;
+      const participants = result.participants;
+      const expenseDate = result.date;
 
       for (const p of participants) {
         await updateMonthlySummary(p.userId, expenseDate);
       }
       // Also update the payer (if not in participants list, though usually is)
-      if (!participants.find((p: any) => p.userId === sharedExpense.paidByUserId)) {
+      if (!participants.find(p => p.userId === sharedExpense.paidByUserId)) {
         await updateMonthlySummary(sharedExpense.paidByUserId, expenseDate);
       }
     }

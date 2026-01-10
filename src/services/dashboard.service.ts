@@ -746,11 +746,15 @@ export const getPersonalExpenses = async (userId: string, month?: number, year?:
 
   if (!summary) {
     // Fallback: Calculate and cache
-    summary = await updateMonthlySummary(userId, new Date(targetYear, targetMonth, 1)) as any;
+    const calculatedSummary = await updateMonthlySummary(userId, new Date(targetYear, targetMonth, 1));
+    return {
+      total: Number(calculatedSummary.personalExpense || 0),
+      month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
+    };
   }
 
   return {
-    total: Number(summary?.personalExpense || 0),
+    total: Number(summary.personalExpense || 0),
     month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
   };
 };
@@ -791,13 +795,19 @@ export const getSharedExpensesTotal = async (userId: string, month?: number, yea
     },
   });
 
+  const monthDate = new Date(targetYear, targetMonth);
+
   if (!summary) {
-    summary = await updateMonthlySummary(userId, new Date(targetYear, targetMonth, 1)) as any;
+    const calculatedSummary = await updateMonthlySummary(userId, new Date(targetYear, targetMonth, 1));
+    return {
+      total: Number(calculatedSummary.sharedExpense || 0),
+      count,
+      month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
+    };
   }
 
-  const monthDate = new Date(targetYear, targetMonth);
   return {
-    total: Number(summary?.sharedExpense || 0),
+    total: Number(summary.sharedExpense || 0),
     count,
     month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
   };
@@ -825,12 +835,24 @@ export const getMonthlySavings = async (userId: string, month?: number, year?: n
   });
 
   if (!summary) {
-    summary = await updateMonthlySummary(userId, new Date(targetYear, targetMonth, 1)) as any;
+    const calculatedSummary = await updateMonthlySummary(userId, new Date(targetYear, targetMonth, 1));
+    const savings = Number(calculatedSummary.savings || 0);
+    const totalIncome = Number(calculatedSummary.income || 0);
+    const totalExpenses = Number(calculatedSummary.expense || 0);
+    const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
+
+    return {
+      savings,
+      savingsRate,
+      income: totalIncome,
+      expenses: totalExpenses,
+      month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
+    };
   }
 
-  const savings = Number(summary?.savings || 0);
-  const totalIncome = Number(summary?.income || 0);
-  const totalExpenses = Number(summary?.expense || 0);
+  const savings = Number(summary.savings || 0);
+  const totalIncome = Number(summary.income || 0);
+  const totalExpenses = Number(summary.expense || 0);
   const savingsRate = totalIncome > 0 ? (savings / totalIncome) * 100 : 0;
 
   return {

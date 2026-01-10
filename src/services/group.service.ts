@@ -679,7 +679,7 @@ export const updateDefaultSplit = async (
   await prisma.group.update({
     where: { id: groupId },
     data: {
-      defaultSplitType: data.defaultSplitType as any,
+      defaultSplitType: data.defaultSplitType as 'EQUAL' | 'PERCENTAGE' | 'EXACT' | 'SHARES',
     },
   });
 

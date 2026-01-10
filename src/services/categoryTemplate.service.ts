@@ -3,6 +3,7 @@ import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import { DEFAULT_CATEGORY_TEMPLATES } from '../data/categoryTemplates';
 import { prisma } from '../utils/prisma';
+import logger from '../utils/logger';
 
 // Cache para templates (TTL: 24 horas)
 const CACHE_KEY = 'category_templates';
@@ -29,13 +30,13 @@ export class CategoryTemplateService {
       const existingCount = await prisma.categoryTemplate.count();
 
       if (existingCount > 0) {
-        console.log(`✓ CategoryTemplates already initialized (${existingCount} templates found)`);
+        logger.info(`CategoryTemplates already initialized (${existingCount} templates found)`);
         // Check if all templates from DEFAULT_CATEGORY_TEMPLATES exist
         await this.addMissingTemplates();
         return;
       }
 
-      console.log('Initializing 84 default category templates...');
+      logger.info('Initializing 84 default category templates...');
 
       // Crear un mapa de templates por nombre para referencias de parents
       const templatesByName = new Map<string, string>();
@@ -83,9 +84,9 @@ export class CategoryTemplateService {
         templatesByName.set(`${template.parentName}/${template.name}`, created.id);
       }
 
-      console.log(`✓ Successfully initialized ${templatesByName.size} category templates`);
+      logger.info(`Successfully initialized ${templatesByName.size} category templates`);
     } catch (error) {
-      console.error('Error initializing default templates:', error);
+      logger.error('Error initializing default templates:', error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -224,9 +225,9 @@ export class CategoryTemplateService {
     try {
       // TODO: Implementar cuando Redis esté disponible
       // await redis.del(CACHE_KEY);
-      console.log('Category templates cache invalidated');
+      logger.info('Category templates cache invalidated');
     } catch (error) {
-      console.warn('Error invalidating template cache:', error);
+      logger.warn('Error invalidating template cache:', error);
     }
   }
 
@@ -281,7 +282,7 @@ export class CategoryTemplateService {
           },
         });
         templatesByName.set(template.name, created.id);
-        console.log(`✓ Added missing parent template: ${template.name}`);
+        logger.info(`Added missing parent template: ${template.name}`);
       }
 
       // Find child categories to add
@@ -293,7 +294,7 @@ export class CategoryTemplateService {
         const parentId = templatesByName.get(template.parentName!);
 
         if (!parentId) {
-          console.warn(`Parent template not found for: ${template.name} (parent: ${template.parentName})`);
+          logger.warn(`Parent template not found for: ${template.name} (parent: ${template.parentName})`);
           continue;
         }
 
@@ -308,15 +309,15 @@ export class CategoryTemplateService {
             parentTemplateId: parentId,
           },
         });
-        console.log(`✓ Added missing child template: ${template.name} (parent: ${template.parentName})`);
+        logger.info(`Added missing child template: ${template.name} (parent: ${template.parentName})`);
       }
 
       const totalAdded = missingParents.length + missingChildren.length;
       if (totalAdded > 0) {
-        console.log(`✓ Added ${totalAdded} missing category templates`);
+        logger.info(`Added ${totalAdded} missing category templates`);
       }
     } catch (error) {
-      console.error('Error adding missing templates:', error);
+      logger.error('Error adding missing templates:', error);
     }
   }
 }

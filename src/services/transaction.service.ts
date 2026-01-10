@@ -10,6 +10,7 @@ import {
 } from './categoryResolver.service';
 import { updateMonthlySummary } from './summary.service';
 import { prisma } from '../utils/prisma';
+import logger from '../utils/logger';
 
 // Template-based category system is now the default system
 
@@ -722,7 +723,7 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
     const normalizedRequestingUserId = userId.trim().toLowerCase();
 
     // DEBUG: Log detallado para entender el problema
-    console.log('🔍 DELETE SHARED EXPENSE - DEBUG INFO:', {
+    logger.debug('DELETE SHARED EXPENSE - DEBUG INFO', {
       sharedExpenseId: sharedExpense.id,
       paidByUserId: sharedExpense.paidByUserId,
       paidByUserIdLength: sharedExpense.paidByUserId.length,

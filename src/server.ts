@@ -28,6 +28,7 @@ import dashboardPreferenceRoutes from './routes/dashboardPreference.routes';
 import loanRoutes from './routes/loan.routes';
 import voiceRoutes from './routes/voice.routes';
 import { CategoryTemplateService } from './services/categoryTemplate.service';
+import logger from './utils/logger';
 
 // Load environment variables (via env.ts)
 
@@ -120,17 +121,17 @@ app.use(errorHandler);
   try {
     await CategoryTemplateService.initializeDefaultTemplates();
   } catch (error) {
-    console.error('⚠️  Failed to initialize category templates:', error);
+    logger.error('Failed to initialize category templates:', error);
     // Don't block server startup if this fails
   }
 })();
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📝 Environment: ${env.NODE_ENV}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`📚 API Docs: http://localhost:${PORT}/api-docs`);
+  logger.info(`Server running on port ${PORT}`);
+  logger.info(`Environment: ${env.NODE_ENV}`);
+  logger.info(`Health check: http://localhost:${PORT}/health`);
+  logger.info(`API Docs: http://localhost:${PORT}/api-docs`);
 });
 
 export default app;

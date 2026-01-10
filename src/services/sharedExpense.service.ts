@@ -4,6 +4,7 @@ import * as notificationService from './notification.service';
 import { updateMonthlySummary } from './summary.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 import { prisma } from '../utils/prisma';
+import logger from '../utils/logger';
 
 interface ParticipantData {
   userId: string;
@@ -149,7 +150,7 @@ export const createSharedExpense = async (
 
   // DEBUG: Log para verificar quién está pagando
   const finalPaidByUserId = data.paidByUserId || userId;
-  console.log('🔍 CREATE SHARED EXPENSE - DEBUG INFO:', {
+  logger.debug('CREATE SHARED EXPENSE - DEBUG INFO', {
     authenticatedUserId: userId,
     authenticatedUserIdLength: userId.length,
     authenticatedUserIdType: typeof userId,
@@ -1155,7 +1156,7 @@ export const settleAllBalance = async (
   });
 
   // Mark all participants as paid
-  console.log('🔍 DEBUG settleAllBalance - Found expenses:', expenses.length);
+  logger.debug('DEBUG settleAllBalance - Found expenses', { expensesCount: expenses.length });
 
   const updatePromises = expenses.flatMap((expense) =>
     expense.participants
@@ -1166,7 +1167,10 @@ export const settleAllBalance = async (
             (expense.paidByUserId === otherUserId && p.userId === userId))
       )
       .map((p) => {
-        console.log(`🔍 DEBUG settleAllBalance - Marking participant ${p.id} as paid for expense ${expense.id}`);
+        logger.debug('DEBUG settleAllBalance - Marking participant as paid', {
+          participantId: p.id,
+          expenseId: expense.id,
+        });
         return prisma.expenseParticipant.update({
           where: { id: p.id },
           data: {
@@ -1178,9 +1182,9 @@ export const settleAllBalance = async (
       })
   );
 
-  console.log('🔍 DEBUG settleAllBalance - Update promises:', updatePromises.length);
+  logger.debug('DEBUG settleAllBalance - Update promises', { promisesCount: updatePromises.length });
   const updatedParticipants = await Promise.all(updatePromises);
-  console.log('🔍 DEBUG settleAllBalance - Updated participants:', updatedParticipants.length);
+  logger.debug('DEBUG settleAllBalance - Updated participants', { participantsCount: updatedParticipants.length });
 
   // Verify the updates by querying the database
   const verifyParticipants = await prisma.expenseParticipant.findMany({
@@ -1197,7 +1201,7 @@ export const settleAllBalance = async (
       expenseId: true,
     }
   });
-  console.log('🔍 DEBUG settleAllBalance - Verification from DB:', JSON.stringify(verifyParticipants, null, 2));
+  logger.debug('DEBUG settleAllBalance - Verification from DB', { verifyParticipants });
 
   // Transaction creation logic
   let transactionsCreated = false;

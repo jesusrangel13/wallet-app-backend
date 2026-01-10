@@ -66,7 +66,7 @@ export class CategoryTemplateService {
         const parentId = templatesByName.get(template.parentName!);
 
         if (!parentId) {
-          console.warn(`Parent template not found for: ${template.name} (parent: ${template.parentName})`);
+          logger.warn(`Parent template not found for: ${template.name} (parent: ${template.parentName})`);
           continue;
         }
 
@@ -133,7 +133,7 @@ export class CategoryTemplateService {
 
       return hierarchical;
     } catch (error) {
-      console.error('Error fetching template hierarchy:', error);
+      logger.error('Error fetching template hierarchy:', error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -159,7 +159,7 @@ export class CategoryTemplateService {
 
       return templates.map(t => this.mapToHierarchy(t));
     } catch (error) {
-      console.error(`Error fetching templates for type ${type}:`, error);
+      logger.error(`Error fetching templates for type ${type}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -182,7 +182,7 @@ export class CategoryTemplateService {
 
       return this.mapToHierarchy(template);
     } catch (error) {
-      console.error(`Error fetching template ${id}:`, error);
+      logger.error(`Error fetching template ${id}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -213,7 +213,7 @@ export class CategoryTemplateService {
         orderBy: [{ type: 'asc' }, { orderIndex: 'asc' }],
       });
     } catch (error) {
-      console.error('Error fetching all templates:', error);
+      logger.error('Error fetching all templates:', error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }

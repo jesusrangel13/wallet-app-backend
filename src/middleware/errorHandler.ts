@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ErrorCodes, type ErrorCode } from '../constants/errorCodes';
+import logger from '../utils/logger';
 
 export class AppError extends Error {
   statusCode: number;
@@ -32,7 +33,7 @@ export const errorHandler = (
 
   // Prisma errors
   if (err.name === 'PrismaClientKnownRequestError') {
-    console.error('Prisma Error:', (err as any).code, (err as any).meta);
+    logger.error('Prisma Error', { code: (err as any).code, meta: (err as any).meta });
     return res.status(400).json({
       status: 'error',
       errorCode: ErrorCodes.DATABASE_ERROR,
@@ -58,7 +59,7 @@ export const errorHandler = (
   }
 
   // Generic error
-  console.error('❌ Error:', err);
+  logger.error('Unhandled error', { error: err });
 
   res.status(500).json({
     status: 'error',

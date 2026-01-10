@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { sanitizeObject } from '../utils/sanitizer';
+import logger from '../utils/logger';
 
 /**
  * Global sanitization middleware
@@ -27,7 +28,7 @@ export const sanitizeMiddleware = (req: Request, res: Response, next: NextFuncti
   } catch (error) {
     // If sanitization fails, log error but continue
     // This prevents the middleware from breaking the app
-    console.error('❌ Sanitization middleware error:', error);
+    logger.error('Sanitization middleware error:', error);
     next();
   }
 };

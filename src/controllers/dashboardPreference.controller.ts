@@ -1,6 +1,7 @@
 import { Response } from 'express'
 import { dashboardPreferenceService } from '../services/dashboardPreference.service'
 import { AuthRequest } from '../types/auth'
+import logger from '../utils/logger';
 
 export class DashboardPreferenceController {
   /**
@@ -22,7 +23,7 @@ export class DashboardPreferenceController {
         data: preferences,
       })
     } catch (error: any) {
-      console.error('Error getting dashboard preferences:', error)
+      logger.error('Error getting dashboard preferences:', error)
       return res.status(500).json({
         error: 'Failed to get dashboard preferences',
       })
@@ -59,7 +60,7 @@ export class DashboardPreferenceController {
         data: preferences,
       })
     } catch (error: any) {
-      console.error('Error saving dashboard preferences:', error)
+      logger.error('Error saving dashboard preferences:', error)
       return res.status(500).json({
         error: 'Failed to save dashboard preferences',
       })
@@ -90,7 +91,7 @@ export class DashboardPreferenceController {
         data: preferences,
       })
     } catch (error: any) {
-      console.error('Error adding widget:', error)
+      logger.error('Error adding widget:', error)
       return res.status(500).json({
         error: 'Failed to add widget',
       })
@@ -121,7 +122,7 @@ export class DashboardPreferenceController {
         data: preferences,
       })
     } catch (error: any) {
-      console.error('Error removing widget:', error)
+      logger.error('Error removing widget:', error)
       return res.status(500).json({
         error: 'Failed to remove widget',
       })
@@ -161,7 +162,7 @@ export class DashboardPreferenceController {
         data: preferences,
       })
     } catch (error: any) {
-      console.error('Error updating widget settings:', error)
+      logger.error('Error updating widget settings:', error)
       return res.status(500).json({
         error: 'Failed to update widget settings',
       })
@@ -192,7 +193,7 @@ export class DashboardPreferenceController {
         data: preferences,
       })
     } catch (error: any) {
-      console.error('Error updating layout:', error)
+      logger.error('Error updating layout:', error)
       return res.status(500).json({
         error: 'Failed to update layout',
       })
@@ -218,7 +219,7 @@ export class DashboardPreferenceController {
         data: preferences,
       })
     } catch (error: any) {
-      console.error('Error resetting dashboard preferences:', error)
+      logger.error('Error resetting dashboard preferences:', error)
       return res.status(500).json({
         error: 'Failed to reset dashboard preferences',
       })

@@ -1,6 +1,7 @@
 import { resolveCategoriesBatch } from './categoryResolver.service';
 import { updateMonthlySummary } from './summary.service';
 import { prisma } from '../utils/prisma';
+import logger from '../utils/logger';
 
 export const getCashFlow = async (userId: string, months: number = 6, endDate?: Date) => {
   const end = endDate || new Date();
@@ -717,7 +718,7 @@ export const getDashboardSummary = async (userId: string, month?: number, year?:
       timestamp: new Date().toISOString(),
     };
   } catch (error) {
-    console.error('Error getting dashboard summary:', error);
+    logger.error('Error getting dashboard summary:', error);
     throw error;
   }
 };

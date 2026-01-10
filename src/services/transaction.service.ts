@@ -112,7 +112,7 @@ export const createTransaction = async (
   }
 
   if (data.categoryId && !categoryInfo) {
-    console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
+    logger.error(`❌ Category validation failed for ID: ${data.categoryId}`);
     throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
   }
 
@@ -212,7 +212,7 @@ export const createTransaction = async (
       const matcher = new SmartMatcherService();
       // We learn that this PAYEE maps to this CATEGORY
       matcher.learn(userId, data.payee!, data.categoryId!, data.payee);
-    }).catch(err => console.error("Failed to trigger smart learning", err));
+    }).catch(err => logger.error("Failed to trigger smart learning", err));
   }
 
   // Update monthly summary
@@ -572,7 +572,7 @@ export const updateTransaction = async (
     const isValidCategory = await validateCategoryId(data.categoryId, userId);
 
     if (!isValidCategory) {
-      console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
+      logger.error(`❌ Category validation failed for ID: ${data.categoryId}`);
       throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
     }
   }
@@ -1004,7 +1004,7 @@ export const bulkDeleteTransactions = async (
       results.push({ transactionId, success: true, ...result });
     } catch (error: any) {
       // If deletion fails (e.g., no permission to delete shared expense), log and continue
-      console.error(`Error deleting transaction ${transactionId}:`, error.message);
+      logger.error(`Error deleting transaction ${transactionId}:`, error.message);
       errors.push({
         transactionId,
         success: false,

@@ -19,7 +19,7 @@ export const authenticate = (
     const decoded = verifyToken(token);
 
     // Attach user to request
-    (req as any).user = decoded;
+    req.user = decoded;
 
     next();
   } catch (error) {

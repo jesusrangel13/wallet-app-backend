@@ -8,7 +8,7 @@ export const createAccount = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const validatedData = createAccountSchema.parse(req.body);
     const account = await accountService.createAccount(userId, validatedData);
 
@@ -28,7 +28,7 @@ export const getAccounts = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     // Extract pagination parameters
     const page = req.query.page ? Number(req.query.page) : undefined;
@@ -51,7 +51,7 @@ export const getAccountById = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const account = await accountService.getAccountById(userId, id);
 
@@ -70,7 +70,7 @@ export const updateAccount = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const validatedData = updateAccountSchema.parse(req.body);
     const account = await accountService.updateAccount(userId, id, validatedData);
@@ -91,7 +91,7 @@ export const deleteAccount = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const { transferToAccountId } = req.body;
 
@@ -112,7 +112,7 @@ export const getAccountBalance = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const balance = await accountService.getAccountBalance(userId, id);
 
@@ -131,7 +131,7 @@ export const getTotalBalance = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const balance = await accountService.getTotalBalance(userId);
 
     res.status(200).json({
@@ -149,7 +149,7 @@ export const getAccountBalanceHistory = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const month = req.query.month ? parseInt(req.query.month as string) : undefined;
     const year = req.query.year ? parseInt(req.query.year as string) : undefined;

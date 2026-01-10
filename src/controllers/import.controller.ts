@@ -7,7 +7,7 @@ export const importTransactions = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { accountId, fileName, fileType, transactions } = req.body;
 
     // Start import process (this will create the import history and process transactions)
@@ -34,7 +34,7 @@ export const getImportHistory = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     // Extract pagination parameters
     const page = req.query.page ? Number(req.query.page) : undefined;
@@ -58,7 +58,7 @@ export const getImportHistoryById = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
 
     const importHistory = await importService.getImportHistoryById(userId, id);

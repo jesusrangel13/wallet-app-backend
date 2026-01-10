@@ -1,9 +1,10 @@
 import { Express } from 'express';
+import { TokenPayload } from '../../utils/jwt';
 
 declare global {
   namespace Express {
     interface Request {
-      user?: any; // Replace 'any' with your User type/interface (e.g., JwtPayload)
+      user?: TokenPayload;
     }
   }
 }

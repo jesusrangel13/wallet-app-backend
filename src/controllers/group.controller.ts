@@ -9,7 +9,7 @@ export const createGroup = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const validatedData = createGroupSchema.parse(req.body);
     const group = await groupService.createGroup(userId, validatedData);
 
@@ -29,7 +29,7 @@ export const getGroups = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     // Extract optional pagination parameters
     const page = req.query.page ? Number(req.query.page) : undefined;
@@ -61,7 +61,7 @@ export const getGroupById = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const group = await groupService.getGroupById(userId, id);
 
@@ -80,7 +80,7 @@ export const updateGroup = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const validatedData = updateGroupSchema.parse(req.body);
     const group = await groupService.updateGroup(userId, id, validatedData);
@@ -101,7 +101,7 @@ export const deleteGroup = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const result = await groupService.deleteGroup(userId, id);
 
@@ -120,7 +120,7 @@ export const addMember = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const { email } = req.body;
 
@@ -148,7 +148,7 @@ export const removeMember = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id, memberId } = req.params;
     const result = await groupService.removeMember(userId, id, memberId);
 
@@ -167,7 +167,7 @@ export const getGroupBalances = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const balances = await groupService.getGroupBalances(userId, id);
 
@@ -186,7 +186,7 @@ export const updateDefaultSplit = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const { defaultSplitType, memberSplits } = req.body;
 
@@ -218,7 +218,7 @@ export const settleAllBalance = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id: groupId } = req.params;
     const { otherUserId, accountId } = req.body;
 

@@ -11,7 +11,7 @@ export const createTransaction = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const validatedData = req.body;
     const transaction = await transactionService.createTransaction(
       userId,
@@ -34,7 +34,7 @@ export const getTransactions = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     // Process tags array safely
     let tags: string[] | undefined;
@@ -79,7 +79,7 @@ export const getTransactionById = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const transaction = await transactionService.getTransactionById(userId, id);
 
@@ -98,7 +98,7 @@ export const updateTransaction = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const validatedData = req.body;
     const transaction = await transactionService.updateTransaction(
@@ -123,7 +123,7 @@ export const deleteTransaction = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const result = await transactionService.deleteTransaction(userId, id);
 
@@ -142,7 +142,7 @@ export const getTransactionsByCategory = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const data = await transactionService.getTransactionsByCategory(userId);
 
     res.status(200).json({
@@ -160,7 +160,7 @@ export const getTransactionStats = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const month = Number(req.query.month) || new Date().getMonth() + 1;
     const year = Number(req.query.year) || new Date().getFullYear();
 
@@ -181,7 +181,7 @@ export const bulkDeleteTransactions = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { transactionIds } = req.body;
 
     const result = await transactionService.bulkDeleteTransactions(userId, transactionIds);
@@ -201,7 +201,7 @@ export const getRecentTransactions = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const limit = req.query.limit ? Number(req.query.limit) : 5;
 
     const transactions = await transactionService.getRecentTransactions(userId, limit);
@@ -221,7 +221,7 @@ export const getUniquePayees = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const search = req.query.search as string | undefined;
 
     const payees = await transactionService.getUniquePayees(userId, search);

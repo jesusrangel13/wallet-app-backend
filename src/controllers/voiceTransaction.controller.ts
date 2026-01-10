@@ -9,7 +9,7 @@ export const parseVoiceTransaction = async (
     next: NextFunction
 ) => {
     try {
-        const userId = (req as any).user.userId;
+        const userId = req.user!.userId;
         const { text } = req.body;
         console.log('🎤 [VoiceController] Received body:', JSON.stringify(req.body, null, 2));
         console.log('🎤 [VoiceController] Extracted text:', text);

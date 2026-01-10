@@ -8,7 +8,7 @@ export const createSharedExpense = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const validatedData = createSharedExpenseSchema.parse(req.body);
     const expense = await sharedExpenseService.createSharedExpense(
       userId,
@@ -31,7 +31,7 @@ export const updateSharedExpense = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const validatedData = updateSharedExpenseSchema.parse(req.body);
     const expense = await sharedExpenseService.updateSharedExpense(
@@ -56,7 +56,7 @@ export const getSharedExpenses = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const groupId = req.query.groupId as string | undefined;
 
     // Extract pagination parameters
@@ -81,7 +81,7 @@ export const getSharedExpenseById = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const expense = await sharedExpenseService.getSharedExpenseById(userId, id);
 
@@ -100,7 +100,7 @@ export const deleteSharedExpense = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const result = await sharedExpenseService.deleteSharedExpense(userId, id);
 
@@ -119,7 +119,7 @@ export const settlePayment = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const validatedData = createPaymentSchema.parse(req.body);
     const payment = await sharedExpenseService.settlePayment(
       userId,
@@ -144,7 +144,7 @@ export const getPaymentHistory = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const groupId = req.query.groupId as string | undefined;
 
     // Extract pagination parameters
@@ -169,7 +169,7 @@ export const calculateSimplifiedDebts = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { groupId } = req.params;
     const debts = await sharedExpenseService.calculateSimplifiedDebts(
       userId,
@@ -191,7 +191,7 @@ export const markParticipantAsPaid = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id: expenseId, participantUserId } = req.params;
     const { accountId } = req.body;
 
@@ -218,7 +218,7 @@ export const markParticipantAsUnpaid = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id: expenseId, participantUserId } = req.params;
     const participant = await sharedExpenseService.markParticipantAsUnpaid(
       userId,

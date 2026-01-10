@@ -8,7 +8,7 @@ export const createBudget = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const validatedData = createBudgetSchema.parse(req.body);
     const budget = await budgetService.createBudget(userId, validatedData);
 
@@ -28,7 +28,7 @@ export const getBudgets = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const year = req.query.year ? Number(req.query.year) : undefined;
 
     // Extract pagination parameters
@@ -53,7 +53,7 @@ export const getBudgetById = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const budget = await budgetService.getBudgetById(userId, id);
 
@@ -72,7 +72,7 @@ export const updateBudget = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const { amount } = req.body;
     const budget = await budgetService.updateBudget(userId, id, amount);
@@ -93,7 +93,7 @@ export const deleteBudget = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const result = await budgetService.deleteBudget(userId, id);
 
@@ -112,7 +112,7 @@ export const getBudgetVsActual = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const month = Number(req.query.month);
     const year = Number(req.query.year);
 
@@ -140,7 +140,7 @@ export const getCurrentMonthBudget = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const data = await budgetService.getCurrentMonthBudget(userId);
 
     res.status(200).json({

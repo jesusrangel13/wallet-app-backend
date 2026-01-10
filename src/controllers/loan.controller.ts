@@ -12,7 +12,7 @@ export const createLoan = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const loan = await loanService.createLoan(userId, req.body);
 
     res.status(201).json({
@@ -35,7 +35,7 @@ export const getUserLoans = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const filters: any = {};
 
     if (req.query.status) {
@@ -75,7 +75,7 @@ export const getLoanById = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const loan = await loanService.getLoanById(userId, id);
 
@@ -98,7 +98,7 @@ export const recordLoanPayment = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const payment = await loanService.recordLoanPayment(userId, id, req.body);
 
@@ -122,7 +122,7 @@ export const cancelLoan = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const loan = await loanService.cancelLoan(userId, id);
 
@@ -146,7 +146,7 @@ export const deleteLoan = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const result = await loanService.deleteLoan(userId, id);
 
@@ -170,7 +170,7 @@ export const getLoansSummary = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const summary = await loanService.getLoansSummary(userId);
 
     res.status(200).json({
@@ -192,7 +192,7 @@ export const getLoansByBorrower = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const grouped = await loanService.getLoansByBorrower(userId);
 
     res.status(200).json({

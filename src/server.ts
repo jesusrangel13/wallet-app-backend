@@ -103,7 +103,7 @@ v1Router.use('/loans', loanRoutes);
 v1Router.use('/import', importRoutes);
 v1Router.use('/dashboard', dashboardRoutes);
 v1Router.use('/notifications', notificationRoutes);
-v1Router.use('/users', dashboardPreferenceRoutes); // Check if this conflicts with /users above. It seems to be dashboard preferences.
+v1Router.use('/dashboard-preferences', dashboardPreferenceRoutes); // ✅ OPT-9: Fixed route conflict - moved from /users to dedicated path
 v1Router.use('/voice', voiceRoutes);
 
 // Mount v1 router

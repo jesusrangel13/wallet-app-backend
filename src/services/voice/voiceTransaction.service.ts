@@ -3,10 +3,11 @@ import { ContextAssemblyService } from './contextAssembly.service';
 import { SmartMatcherService } from './smartMatcher.service';
 import currency from 'currency.js';
 import logger from '../../utils/logger';
+import { env } from '../../config/env';
 const Sugar = require('sugar-date');
 require('sugar-date/locales/es'); // Import Spanish locale
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const groq = new Groq({ apiKey: env.GROQ_API_KEY });
 const contextService = new ContextAssemblyService();
 const smartMatcher = new SmartMatcherService();
 

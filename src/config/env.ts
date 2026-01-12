@@ -17,8 +17,8 @@ const envSchema = z.object({
     JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
     JWT_EXPIRES_IN: z.string().default('7d'),
 
-    // External Services (Optional purely for validation if referenced)
-    // Add others as needed
+    // External Services
+    GROQ_API_KEY: z.string().optional(), // Voice transaction AI service
 });
 
 export const env = envSchema.parse(process.env);

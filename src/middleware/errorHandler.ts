@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ErrorCodes, type ErrorCode } from '../constants/errorCodes';
 import logger from '../utils/logger';
+import { env } from '../config/env';
 
 interface PrismaError extends Error {
   code?: string;
@@ -70,7 +71,7 @@ export const errorHandler = (
   res.status(500).json({
     status: 'error',
     errorCode: ErrorCodes.INTERNAL_SERVER_ERROR,
-    message: process.env.NODE_ENV === 'development'
+    message: env.NODE_ENV === 'development'
       ? err.message
       : 'Internal server error'
   });

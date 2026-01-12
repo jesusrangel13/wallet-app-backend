@@ -4,6 +4,18 @@
  */
 
 import { describe, it, expect, jest, beforeEach } from '@jest/globals'
+import { PrismaClient } from '@prisma/client'
+import { mockDeep } from 'jest-mock-extended'
+
+// Create mocks BEFORE any imports
+const prismaMock = mockDeep<PrismaClient>()
+
+// Mock modules BEFORE importing the service
+jest.mock('../../utils/prisma', () => ({
+  prisma: prismaMock,
+}))
+
+// NOW import the service and other dependencies
 import {
   createAccount,
   getAccounts,
@@ -12,14 +24,9 @@ import {
   deleteAccount,
   getTotalBalance,
 } from '../account.service'
-import { prismaMock, mockAccount } from '../../__tests__/mocks/prisma'
+import { mockAccount } from '../../__tests__/mocks/prisma'
 import { AppError } from '../../middleware/errorHandler'
 import { ErrorCodes } from '../../constants/errorCodes'
-
-// Mock dependencies
-jest.mock('../../utils/prisma', () => ({
-  prisma: prismaMock,
-}))
 
 describe('AccountService', () => {
   const userId = 'user-123'
@@ -145,12 +152,11 @@ describe('AccountService', () => {
 
       expect(result.data).toEqual(accounts)
       expect(result.pagination).toEqual({
-        currentPage: 1,
-        pageSize: 50,
-        totalItems: 2,
+        page: 1,
+        limit: 50,
+        total: 2,
         totalPages: 1,
-        hasNextPage: false,
-        hasPreviousPage: false,
+        hasMore: false,
       })
     })
 
@@ -167,9 +173,9 @@ describe('AccountService', () => {
         take: 20,
       })
 
-      expect((result.pagination as any).currentPage).toBe(2)
-      expect((result.pagination as any).pageSize).toBe(20)
-      expect((result.pagination as any).totalPages).toBe(5)
+      expect(result.pagination.page).toBe(2)
+      expect(result.pagination.limit).toBe(20)
+      expect(result.pagination.totalPages).toBe(5)
     })
 
     it('should run count and findMany in parallel', async () => {
@@ -287,9 +293,9 @@ describe('AccountService', () => {
     it('should delete account with no transactions', async () => {
       const account = mockAccount({ id: accountId, userId })
 
-      prismaMock.account.findFirst.mockResolvedValue(account as any)
+      prismaMock.account.findFirst.mockResolvedValue(account)
       prismaMock.transaction.count.mockResolvedValue(0)
-      prismaMock.account.delete.mockResolvedValue(account as any)
+      prismaMock.account.delete.mockResolvedValue(account)
 
       const result = await deleteAccount(userId, accountId)
 
@@ -302,7 +308,7 @@ describe('AccountService', () => {
     it('should return info when account has transactions', async () => {
       const account = mockAccount({ id: accountId, userId })
 
-      prismaMock.account.findFirst.mockResolvedValue(account as any)
+      prismaMock.account.findFirst.mockResolvedValue(account)
       prismaMock.transaction.count.mockResolvedValue(5)
 
       const result = await deleteAccount(userId, accountId)
@@ -319,11 +325,11 @@ describe('AccountService', () => {
   })
 
   describe('getTotalBalance', () => {
-    it('should calculate total balance across all accounts', async () => {
+    it('should calculate total balance by currency', async () => {
       const accounts = [
-        mockAccount({ balance: 1000, type: 'CASH' }),
-        mockAccount({ balance: 500, type: 'SAVINGS' }),
-        mockAccount({ balance: -200, type: 'CREDIT' }), // Credit card debt
+        mockAccount({ balance: 1000, currency: 'USD' }),
+        mockAccount({ balance: 500, currency: 'USD' }),
+        mockAccount({ balance: 200, currency: 'EUR' }),
       ]
 
       prismaMock.account.findMany.mockResolvedValue(accounts)
@@ -331,36 +337,42 @@ describe('AccountService', () => {
       const result = await getTotalBalance(userId)
 
       expect(prismaMock.account.findMany).toHaveBeenCalledWith({
-        where: { userId, isArchived: false },
-        select: { balance: true, type: true },
+        where: {
+          userId,
+          includeInTotalBalance: true,
+          isArchived: false
+        },
+        select: { balance: true, currency: true },
       })
 
       expect(result).toEqual({
-        totalBalance: 1300, // 1000 + 500 - 200
-        cashBalance: 1000,
-        savingsBalance: 500,
-        creditBalance: -200,
+        USD: 1500, // 1000 + 500
+        EUR: 200,
       })
     })
 
     it('should handle accounts with zero balances', async () => {
-      const accounts = [mockAccount({ balance: 0, type: 'CASH' })]
+      const accounts = [mockAccount({ balance: 0, currency: 'USD' })]
 
       prismaMock.account.findMany.mockResolvedValue(accounts)
 
       const result = await getTotalBalance(userId)
 
-      expect(result.totalBalance).toBe(0)
+      expect(result).toEqual({ USD: 0 })
     })
 
-    it('should exclude archived accounts', async () => {
+    it('should exclude archived accounts and use includeInTotalBalance filter', async () => {
       prismaMock.account.findMany.mockResolvedValue([])
 
       await getTotalBalance(userId)
 
       expect(prismaMock.account.findMany).toHaveBeenCalledWith({
-        where: { userId, isArchived: false },
-        select: { balance: true, type: true },
+        where: {
+          userId,
+          includeInTotalBalance: true,
+          isArchived: false
+        },
+        select: { balance: true, currency: true },
       })
     })
   })

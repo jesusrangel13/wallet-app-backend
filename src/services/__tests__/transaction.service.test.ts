@@ -4,6 +4,27 @@
  */
 
 import { describe, it, expect, jest, beforeEach } from '@jest/globals'
+import { PrismaClient } from '@prisma/client'
+import { mockDeep } from 'jest-mock-extended'
+
+// Create mocks BEFORE any imports
+const prismaMock = mockDeep<PrismaClient>()
+const categoryResolverMock = {
+  resolveCategoryById: jest.fn<() => Promise<string | null>>(),
+  resolveCategoryByDescription: jest.fn<() => Promise<string | null>>(),
+}
+const summaryServiceMock = {
+  updateMonthlySummary: jest.fn<() => Promise<void>>(),
+}
+
+// Mock modules BEFORE importing the service
+jest.mock('../../utils/prisma', () => ({
+  prisma: prismaMock,
+}))
+jest.mock('../categoryResolver.service', () => categoryResolverMock)
+jest.mock('../summary.service', () => summaryServiceMock)
+
+// NOW import the service and other dependencies
 import {
   createTransaction,
   getTransactions,
@@ -12,21 +33,9 @@ import {
   deleteTransaction,
   getRecentTransactions,
 } from '../transaction.service'
-import { prismaMock, mockUser, mockAccount, mockTransaction, mockTag } from '../../__tests__/mocks/prisma'
+import { mockUser, mockAccount, mockTransaction, mockTag } from '../../__tests__/mocks/prisma'
 import { AppError } from '../../middleware/errorHandler'
 import { ErrorCodes } from '../../constants/errorCodes'
-import * as categoryResolverService from '../categoryResolver.service'
-import * as summaryService from '../summary.service'
-
-// Mock dependencies
-jest.mock('../../utils/prisma', () => ({
-  prisma: prismaMock,
-}))
-jest.mock('../categoryResolver.service')
-jest.mock('../summary.service')
-
-const mockedCategoryResolver = categoryResolverService as jest.Mocked<typeof categoryResolverService>
-const mockedSummaryService = summaryService as jest.Mocked<typeof summaryService>
 
 describe('TransactionService', () => {
   const userId = 'user-123'
@@ -58,12 +67,12 @@ describe('TransactionService', () => {
       // Mock all parallel queries
       prismaMock.user.findUnique.mockResolvedValue(user)
       prismaMock.account.findFirst.mockResolvedValue(account)
-      mockedCategoryResolver.resolveCategoryById.mockResolvedValue(null)
+      categoryResolverMock.resolveCategoryById.mockResolvedValue(null)
       prismaMock.tag.findMany.mockResolvedValue([])
 
       prismaMock.transaction.create.mockResolvedValue(createdTransaction)
       prismaMock.account.update.mockResolvedValue({ ...account, balance: 900 })
-      mockedSummaryService.updateMonthlySummary.mockResolvedValue(undefined)
+      summaryServiceMock.updateMonthlySummary.mockResolvedValue(undefined)
 
       const result = await createTransaction(userId, transactionData)
 
@@ -87,7 +96,7 @@ describe('TransactionService', () => {
       })
 
       // Verify summary update
-      expect(mockedSummaryService.updateMonthlySummary).toHaveBeenCalledWith(
+      expect(summaryServiceMock.updateMonthlySummary).toHaveBeenCalledWith(
         userId,
         expect.any(Number),
         expect.any(Number)
@@ -111,12 +120,12 @@ describe('TransactionService', () => {
 
       prismaMock.user.findUnique.mockResolvedValue(user)
       prismaMock.account.findFirst.mockResolvedValue(account)
-      mockedCategoryResolver.resolveCategoryById.mockResolvedValue(null)
+      categoryResolverMock.resolveCategoryById.mockResolvedValue(null)
       prismaMock.tag.findMany.mockResolvedValue([])
 
       prismaMock.transaction.create.mockResolvedValue(createdTransaction)
       prismaMock.account.update.mockResolvedValue({ ...account, balance: 1500 })
-      mockedSummaryService.updateMonthlySummary.mockResolvedValue(undefined)
+      summaryServiceMock.updateMonthlySummary.mockResolvedValue(undefined)
 
       await createTransaction(userId, transactionData)
 
@@ -146,14 +155,14 @@ describe('TransactionService', () => {
       prismaMock.account.findFirst
         .mockResolvedValueOnce(account)
         .mockResolvedValueOnce(toAccount)
-      mockedCategoryResolver.resolveCategoryById.mockResolvedValue(null)
+      categoryResolverMock.resolveCategoryById.mockResolvedValue(null)
       prismaMock.tag.findMany.mockResolvedValue([])
 
       prismaMock.transaction.create.mockResolvedValue(createdTransaction)
       prismaMock.account.update
         .mockResolvedValueOnce({ ...account, balance: 800 }) // Source account
         .mockResolvedValueOnce({ ...toAccount, balance: 700 }) // Target account
-      mockedSummaryService.updateMonthlySummary.mockResolvedValue(undefined)
+      summaryServiceMock.updateMonthlySummary.mockResolvedValue(undefined)
 
       await createTransaction(userId, transactionData)
 
@@ -178,7 +187,7 @@ describe('TransactionService', () => {
 
       prismaMock.user.findUnique.mockResolvedValue(user)
       prismaMock.account.findFirst.mockResolvedValue(null)
-      mockedCategoryResolver.resolveCategoryById.mockResolvedValue(null)
+      categoryResolverMock.resolveCategoryById.mockResolvedValue(null)
       prismaMock.tag.findMany.mockResolvedValue([])
 
       await expect(createTransaction(userId, transactionData)).rejects.toThrow(AppError)
@@ -198,7 +207,7 @@ describe('TransactionService', () => {
 
       prismaMock.user.findUnique.mockResolvedValue(user)
       prismaMock.account.findFirst.mockResolvedValue(account)
-      mockedCategoryResolver.resolveCategoryById.mockResolvedValue(null)
+      categoryResolverMock.resolveCategoryById.mockResolvedValue(null)
       prismaMock.tag.findMany.mockResolvedValue([])
 
       await expect(createTransaction(userId, transactionData)).rejects.toThrow(AppError)
@@ -220,12 +229,12 @@ describe('TransactionService', () => {
 
       prismaMock.user.findUnique.mockResolvedValue(user)
       prismaMock.account.findFirst.mockResolvedValue(account)
-      mockedCategoryResolver.resolveCategoryById.mockResolvedValue(null)
+      categoryResolverMock.resolveCategoryById.mockResolvedValue(null)
       prismaMock.tag.findMany.mockResolvedValue(tags)
 
       prismaMock.transaction.create.mockResolvedValue(createdTransaction)
       prismaMock.account.update.mockResolvedValue({ ...account, balance: 900 })
-      mockedSummaryService.updateMonthlySummary.mockResolvedValue(undefined)
+      summaryServiceMock.updateMonthlySummary.mockResolvedValue(undefined)
 
       await createTransaction(userId, transactionData)
 
@@ -401,7 +410,7 @@ describe('TransactionService', () => {
       prismaMock.account.findFirst.mockResolvedValue(account)
       prismaMock.transaction.delete.mockResolvedValue(transaction)
       prismaMock.account.update.mockResolvedValue({ ...account, balance: 1000 })
-      mockedSummaryService.updateMonthlySummary.mockResolvedValue(undefined)
+      summaryServiceMock.updateMonthlySummary.mockResolvedValue(undefined)
 
       await deleteTransaction(userId, 'txn-123')
 
@@ -417,7 +426,7 @@ describe('TransactionService', () => {
       })
 
       // Verify summary updated
-      expect(mockedSummaryService.updateMonthlySummary).toHaveBeenCalled()
+      expect(summaryServiceMock.updateMonthlySummary).toHaveBeenCalled()
     })
 
     it('should throw error when transaction not found', async () => {

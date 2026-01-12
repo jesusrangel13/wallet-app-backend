@@ -19,12 +19,12 @@ module.exports = {
     '/scripts/',
   ],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
-  globals: {
-    'ts-jest': {
+  transform: {
+    '^.+\\.ts$': ['ts-jest', {
       tsconfig: {
         strict: false,
         skipLibCheck: true
       }
-    }
+    }]
   }
 }

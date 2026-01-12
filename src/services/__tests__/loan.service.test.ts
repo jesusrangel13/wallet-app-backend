@@ -4,6 +4,23 @@
  */
 
 import { describe, it, expect, jest, beforeEach } from '@jest/globals'
+import { PrismaClient } from '@prisma/client'
+import { mockDeep } from 'jest-mock-extended'
+
+// Create mocks BEFORE any imports
+const prismaMock = mockDeep<PrismaClient>()
+const categoryResolverMock = {
+  resolveCategoryById: jest.fn<() => Promise<string | null>>(),
+  searchCategoriesByName: jest.fn<() => Promise<string[]>>(),
+}
+
+// Mock modules BEFORE importing the service
+jest.mock('../../utils/prisma', () => ({
+  prisma: prismaMock,
+}))
+jest.mock('../categoryResolver.service', () => categoryResolverMock)
+
+// NOW import the service and other dependencies
 import {
   createLoan,
   getUserLoans,
@@ -12,18 +29,9 @@ import {
   cancelLoan,
   deleteLoan,
 } from '../loan.service'
-import { prismaMock, mockUser, mockAccount, mockLoan, mockTransaction } from '../../__tests__/mocks/prisma'
+import { mockUser, mockAccount, mockLoan, mockTransaction } from '../../__tests__/mocks/prisma'
 import { AppError } from '../../middleware/errorHandler'
 import { ErrorCodes } from '../../constants/errorCodes'
-import * as categoryResolverService from '../categoryResolver.service'
-
-// Mock dependencies
-jest.mock('../../utils/prisma', () => ({
-  prisma: prismaMock,
-}))
-jest.mock('../categoryResolver.service')
-
-const mockedCategoryResolver = categoryResolverService as jest.Mocked<typeof categoryResolverService>
 
 describe('LoanService', () => {
   const userId = 'user-123'
@@ -64,7 +72,7 @@ describe('LoanService', () => {
       // Mock validations
       prismaMock.user.findUnique.mockResolvedValue(user)
       prismaMock.account.findFirst.mockResolvedValue(account)
-      mockedCategoryResolver.searchCategoriesByName.mockResolvedValue(['cat-loan'])
+      categoryResolverMock.searchCategoriesByName.mockResolvedValue(['cat-loan'])
 
       // Mock transaction context
       const mockTx = {
@@ -151,7 +159,7 @@ describe('LoanService', () => {
         .mockResolvedValueOnce(user) // Lender
         .mockResolvedValueOnce(borrower) // Borrower
       prismaMock.account.findFirst.mockResolvedValue(account)
-      mockedCategoryResolver.searchCategoriesByName.mockResolvedValue([])
+      categoryResolverMock.searchCategoriesByName.mockResolvedValue([])
 
       const mockTx = {
         loan: { create: jest.fn().mockResolvedValue(mockLoan()) },
@@ -191,12 +199,11 @@ describe('LoanService', () => {
 
       expect(result.data).toEqual(loans)
       expect(result.pagination).toEqual({
-        currentPage: 1,
-        pageSize: 50,
-        totalItems: 2,
+        page: 1,
+        limit: 50,
+        total: 2,
         totalPages: 1,
-        hasNextPage: false,
-        hasPreviousPage: false,
+        hasMore: false,
       })
     })
 
@@ -290,7 +297,7 @@ describe('LoanService', () => {
 
       prismaMock.loan.findFirst.mockResolvedValue(loan)
       prismaMock.account.findFirst.mockResolvedValue(account)
-      mockedCategoryResolver.searchCategoriesByName.mockResolvedValue([])
+      categoryResolverMock.searchCategoriesByName.mockResolvedValue([])
 
       const mockTx = {
         loanPayment: { create: jest.fn().mockResolvedValue({ id: 'payment-123' }) },
@@ -328,7 +335,7 @@ describe('LoanService', () => {
 
       prismaMock.loan.findFirst.mockResolvedValue(loan)
       prismaMock.account.findFirst.mockResolvedValue(account)
-      mockedCategoryResolver.searchCategoriesByName.mockResolvedValue([])
+      categoryResolverMock.searchCategoriesByName.mockResolvedValue([])
 
       const mockTx = {
         loanPayment: { create: jest.fn().mockResolvedValue({ id: 'payment-123' }) },

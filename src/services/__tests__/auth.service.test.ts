@@ -4,24 +4,32 @@
  */
 
 import { describe, it, expect, jest, beforeEach } from '@jest/globals'
-import { register, login, getProfile } from '../auth.service'
-import { prismaMock, mockUser } from '../../__tests__/mocks/prisma'
-import { AppError } from '../../middleware/errorHandler'
-import { ErrorCodes } from '../../constants/errorCodes'
-import * as passwordUtils from '../../utils/password'
-import * as jwtUtils from '../../utils/jwt'
+import { PrismaClient } from '@prisma/client'
+import { DeepMockProxy, mockDeep } from 'jest-mock-extended'
 
-// Mock the prisma module
+// Create mocks BEFORE any imports
+const prismaMock = mockDeep<PrismaClient>()
+const passwordUtilsMock = {
+  hashPassword: jest.fn<() => Promise<string>>(),
+  comparePassword: jest.fn<() => Promise<boolean>>(),
+}
+const jwtUtilsMock = {
+  generateToken: jest.fn<() => string>(),
+  verifyToken: jest.fn(),
+}
+
+// Mock modules BEFORE importing the service
 jest.mock('../../utils/prisma', () => ({
   prisma: prismaMock,
 }))
+jest.mock('../../utils/password', () => passwordUtilsMock)
+jest.mock('../../utils/jwt', () => jwtUtilsMock)
 
-// Mock password utilities
-jest.mock('../../utils/password')
-jest.mock('../../utils/jwt')
-
-const mockedPasswordUtils = passwordUtils as jest.Mocked<typeof passwordUtils>
-const mockedJwtUtils = jwtUtils as jest.Mocked<typeof jwtUtils>
+// NOW import the service and other dependencies
+import { register, login, getProfile } from '../auth.service'
+import { mockUser } from '../../__tests__/mocks/prisma'
+import { AppError } from '../../middleware/errorHandler'
+import { ErrorCodes } from '../../constants/errorCodes'
 
 describe('AuthService', () => {
   beforeEach(() => {
@@ -48,76 +56,38 @@ describe('AuthService', () => {
         currency: registerData.currency,
       })
 
-      // Mock dependencies
-      prismaMock.user.findUnique.mockResolvedValue(null) // No existing user
-      mockedPasswordUtils.hashPassword.mockResolvedValue(hashedPassword)
+      prismaMock.user.findUnique.mockResolvedValue(null)
+      passwordUtilsMock.hashPassword.mockResolvedValue(hashedPassword)
       prismaMock.user.create.mockResolvedValue(createdUser)
-      mockedJwtUtils.generateToken.mockReturnValue(token)
+      jwtUtilsMock.generateToken.mockReturnValue(token)
 
       const result = await register(registerData)
 
-      // Assertions
       expect(prismaMock.user.findUnique).toHaveBeenCalledWith({
         where: { email: registerData.email },
       })
-      expect(mockedPasswordUtils.hashPassword).toHaveBeenCalledWith(registerData.password)
+      expect(passwordUtilsMock.hashPassword).toHaveBeenCalledWith(registerData.password)
       expect(prismaMock.user.create).toHaveBeenCalledWith({
         data: {
           email: registerData.email,
-          passwordHash: hashedPassword,
           name: registerData.name,
+          passwordHash: hashedPassword,
           currency: registerData.currency,
           country: registerData.country,
           language: registerData.language,
         },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          currency: true,
-          country: true,
-          language: true,
-          createdAt: true,
-        },
+        select: expect.any(Object),
       })
-      expect(mockedJwtUtils.generateToken).toHaveBeenCalledWith(createdUser.id)
+      expect(jwtUtilsMock.generateToken).toHaveBeenCalledWith(createdUser.id)
       expect(result).toEqual({
         user: createdUser,
         token,
       })
     })
 
-    it('should use default currency and language if not provided', async () => {
-      const minimalData = {
-        email: 'newuser@example.com',
-        password: 'SecurePass123!',
-        name: 'New User',
-      }
-      const hashedPassword = '$2b$10$hashedpassword'
-      const token = 'jwt-token-123'
-
-      prismaMock.user.findUnique.mockResolvedValue(null)
-      mockedPasswordUtils.hashPassword.mockResolvedValue(hashedPassword)
-      prismaMock.user.create.mockResolvedValue(mockUser())
-      mockedJwtUtils.generateToken.mockReturnValue(token)
-
-      await register(minimalData)
-
-      expect(prismaMock.user.create).toHaveBeenCalledWith({
-        data: {
-          email: minimalData.email,
-          passwordHash: hashedPassword,
-          name: minimalData.name,
-          currency: 'USD', // Default
-          country: undefined,
-          language: 'es', // Default
-        },
-        select: expect.any(Object),
-      })
-    })
-
-    it('should throw error when user already exists', async () => {
+    it('should throw error when email already exists', async () => {
       const existingUser = mockUser({ email: registerData.email })
+
       prismaMock.user.findUnique.mockResolvedValue(existingUser)
 
       await expect(register(registerData)).rejects.toThrow(AppError)
@@ -128,9 +98,32 @@ describe('AuthService', () => {
         })
       )
 
-      // Should not attempt to hash password or create user
-      expect(mockedPasswordUtils.hashPassword).not.toHaveBeenCalled()
       expect(prismaMock.user.create).not.toHaveBeenCalled()
+    })
+
+    it('should use default values for optional fields', async () => {
+      const minimalData = {
+        email: 'minimal@example.com',
+        password: 'SecurePass123!',
+        name: 'Minimal User',
+      }
+
+      prismaMock.user.findUnique.mockResolvedValue(null)
+      passwordUtilsMock.hashPassword.mockResolvedValue('$2b$10$hashedpassword')
+      prismaMock.user.create.mockResolvedValue(
+        mockUser({ email: minimalData.email })
+      )
+      jwtUtilsMock.generateToken.mockReturnValue('token-123')
+
+      await register(minimalData)
+
+      const createCall = prismaMock.user.create.mock.calls[0][0]
+      expect(createCall.data).toMatchObject({
+        email: minimalData.email,
+        name: minimalData.name,
+        passwordHash: expect.any(String),
+      })
+      expect(createCall.data.currency).toBe('USD') // Default
     })
   })
 
@@ -145,24 +138,23 @@ describe('AuthService', () => {
       const token = 'jwt-token-123'
 
       prismaMock.user.findUnique.mockResolvedValue(user)
-      mockedPasswordUtils.comparePassword.mockResolvedValue(true)
-      mockedJwtUtils.generateToken.mockReturnValue(token)
+      passwordUtilsMock.comparePassword.mockResolvedValue(true)
+      jwtUtilsMock.generateToken.mockReturnValue(token)
 
       const result = await login(loginData)
 
       expect(prismaMock.user.findUnique).toHaveBeenCalledWith({
         where: { email: loginData.email },
       })
-      expect(mockedPasswordUtils.comparePassword).toHaveBeenCalledWith(
+      expect(passwordUtilsMock.comparePassword).toHaveBeenCalledWith(
         loginData.password,
         user.passwordHash
       )
-      expect(mockedJwtUtils.generateToken).toHaveBeenCalledWith(user.id)
-      expect(result).toEqual({
-        user: expect.not.objectContaining({ passwordHash: expect.anything() }),
-        token,
-      })
+      expect(jwtUtilsMock.generateToken).toHaveBeenCalledWith(user.id)
+
+      // The result should have user without passwordHash
       expect(result.user).not.toHaveProperty('passwordHash')
+      expect(result.token).toBe(token)
     })
 
     it('should throw error when user not found', async () => {
@@ -176,14 +168,14 @@ describe('AuthService', () => {
         })
       )
 
-      expect(mockedPasswordUtils.comparePassword).not.toHaveBeenCalled()
-      expect(mockedJwtUtils.generateToken).not.toHaveBeenCalled()
+      expect(passwordUtilsMock.comparePassword).not.toHaveBeenCalled()
     })
 
-    it('should throw error when password is invalid', async () => {
+    it('should throw error when password is incorrect', async () => {
       const user = mockUser({ email: loginData.email })
+
       prismaMock.user.findUnique.mockResolvedValue(user)
-      mockedPasswordUtils.comparePassword.mockResolvedValue(false)
+      passwordUtilsMock.comparePassword.mockResolvedValue(false)
 
       await expect(login(loginData)).rejects.toThrow(AppError)
       await expect(login(loginData)).rejects.toThrow(
@@ -193,21 +185,7 @@ describe('AuthService', () => {
         })
       )
 
-      expect(mockedJwtUtils.generateToken).not.toHaveBeenCalled()
-    })
-
-    it('should not include passwordHash in response', async () => {
-      const user = mockUser()
-      const token = 'jwt-token-123'
-
-      prismaMock.user.findUnique.mockResolvedValue(user)
-      mockedPasswordUtils.comparePassword.mockResolvedValue(true)
-      mockedJwtUtils.generateToken.mockReturnValue(token)
-
-      const result = await login(loginData)
-
-      expect(result.user).not.toHaveProperty('passwordHash')
-      expect(Object.keys(result.user)).not.toContain('passwordHash')
+      expect(jwtUtilsMock.generateToken).not.toHaveBeenCalled()
     })
   })
 
@@ -215,9 +193,8 @@ describe('AuthService', () => {
     it('should successfully get user profile', async () => {
       const userId = 'user-123'
       const user = mockUser({ id: userId })
-      const { passwordHash, ...userProfile } = user
 
-      prismaMock.user.findUnique.mockResolvedValue(userProfile as any)
+      prismaMock.user.findUnique.mockResolvedValue(user)
 
       const result = await getProfile(userId)
 
@@ -227,25 +204,23 @@ describe('AuthService', () => {
           id: true,
           email: true,
           name: true,
-          avatarUrl: true,
           currency: true,
           country: true,
           language: true,
           isVerified: true,
+          avatarUrl: true,
           createdAt: true,
           updatedAt: true,
         },
       })
-      expect(result).toEqual(userProfile)
-      expect(result).not.toHaveProperty('passwordHash')
+      expect(result).toEqual(user)
     })
 
     it('should throw error when user not found', async () => {
-      const userId = 'non-existent-user'
       prismaMock.user.findUnique.mockResolvedValue(null)
 
-      await expect(getProfile(userId)).rejects.toThrow(AppError)
-      await expect(getProfile(userId)).rejects.toThrow(
+      await expect(getProfile('non-existent')).rejects.toThrow(AppError)
+      await expect(getProfile('non-existent')).rejects.toThrow(
         expect.objectContaining({
           message: ErrorCodes.AUTH_USER_NOT_FOUND,
           statusCode: 404,

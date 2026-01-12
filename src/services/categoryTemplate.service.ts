@@ -256,17 +256,30 @@ export class CategoryTemplateService {
    */
   static async addMissingTemplates(): Promise<void> {
     try {
-      // Get all existing templates
+      // Get all existing templates with parent info
       const existingTemplates = await prisma.categoryTemplate.findMany({
-        select: { name: true, id: true },
+        select: {
+          name: true,
+          id: true,
+          parent: {
+            select: { name: true }
+          }
+        },
       });
 
-      const existingNames = new Set(existingTemplates.map(t => t.name));
+      // Create a unique key for each template (name + parent name)
+      const existingKeys = new Set(
+        existingTemplates.map(t => {
+          const parentName = t.parent?.name || null;
+          return parentName ? `${parentName}/${t.name}` : t.name;
+        })
+      );
+
       const templatesByName = new Map(existingTemplates.map(t => [t.name, t.id]));
 
       // Find parent categories to add
       const missingParents = DEFAULT_CATEGORY_TEMPLATES
-        .filter(t => !t.parentName && !existingNames.has(t.name));
+        .filter(t => !t.parentName && !existingKeys.has(t.name));
 
       // Add missing parent templates
       for (const template of missingParents) {
@@ -287,7 +300,11 @@ export class CategoryTemplateService {
 
       // Find child categories to add
       const missingChildren = DEFAULT_CATEGORY_TEMPLATES
-        .filter(t => t.parentName && !existingNames.has(t.name));
+        .filter(t => {
+          if (!t.parentName) return false;
+          const key = `${t.parentName}/${t.name}`;
+          return !existingKeys.has(key);
+        });
 
       // Add missing child templates
       for (const template of missingChildren) {

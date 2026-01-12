@@ -5,6 +5,75 @@ import { createTransaction } from './transaction.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 import { prisma } from '../utils/prisma';
 
+/**
+ * Batch find or create tags for import operations
+ * Optimizes tag creation from N+1 queries to 2 queries total
+ *
+ * @param tagNames - Array of unique tag names to find or create
+ * @param userId - User ID who owns the tags
+ * @returns Map of tag name -> tag ID for fast lookup
+ */
+async function findOrCreateTagsBatch(
+  tagNames: string[],
+  userId: string
+): Promise<Map<string, string>> {
+  if (tagNames.length === 0) {
+    return new Map();
+  }
+
+  // Remove duplicates and empty strings
+  const uniqueTagNames = [...new Set(tagNames.filter(name => name.trim()))];
+
+  if (uniqueTagNames.length === 0) {
+    return new Map();
+  }
+
+  // Query 1: Find all existing tags in one query
+  const existingTags = await prisma.tag.findMany({
+    where: {
+      userId,
+      name: {
+        in: uniqueTagNames,
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  // Create a map of existing tags
+  const tagMap = new Map<string, string>();
+  existingTags.forEach(tag => {
+    tagMap.set(tag.name, tag.id);
+  });
+
+  // Find which tags need to be created
+  const existingTagNames = new Set(existingTags.map(t => t.name));
+  const tagsToCreate = uniqueTagNames.filter(name => !existingTagNames.has(name));
+
+  // Query 2: Batch create missing tags in one query
+  if (tagsToCreate.length > 0) {
+    const createdTags = await prisma.tag.createManyAndReturn({
+      data: tagsToCreate.map(name => ({
+        userId,
+        name,
+      })),
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    // Add newly created tags to the map
+    createdTags.forEach(tag => {
+      tagMap.set(tag.name, tag.id);
+    });
+  }
+
+  return tagMap;
+}
+
 interface ImportTransactionData {
   row: number;
   date: string;
@@ -78,30 +147,29 @@ export const importTransactions = async (
   let successCount = 0;
   let failedCount = 0;
 
+  // OPT-7: Batch tag operations - Collect all unique tag names first
+  // This optimizes from N+1 queries (one per tag) to just 2 queries total
+  const allTagNames: string[] = [];
+  transactions.forEach(tx => {
+    if (tx.tags && tx.tags.length > 0) {
+      allTagNames.push(...tx.tags);
+    }
+  });
+
+  // Batch find or create all tags in 2 queries total
+  const tagMap = await findOrCreateTagsBatch(allTagNames, userId);
+
   // Process each transaction
   for (const txData of transactions) {
     try {
-      // Find or create tags
+      // Lookup tag IDs from the pre-populated map (O(1) lookup)
       const tagIds: string[] = [];
       if (txData.tags && txData.tags.length > 0) {
         for (const tagName of txData.tags) {
-          let tag = await prisma.tag.findFirst({
-            where: {
-              userId,
-              name: tagName,
-            },
-          });
-
-          if (!tag) {
-            tag = await prisma.tag.create({
-              data: {
-                userId,
-                name: tagName,
-              },
-            });
+          const tagId = tagMap.get(tagName);
+          if (tagId) {
+            tagIds.push(tagId);
           }
-
-          tagIds.push(tag.id);
         }
       }
 

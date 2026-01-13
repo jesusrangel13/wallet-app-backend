@@ -132,7 +132,7 @@ export const createSharedExpenseSchema = z.object({
   categoryId: z.string().uuid('Invalid category ID').optional(),
   receiptUrl: z.string().url().optional().or(z.literal('')).optional(),
   splitType: z.enum(['EQUAL', 'PERCENTAGE', 'EXACT', 'SHARES']).default('EQUAL'),
-  date: z.string().datetime().optional(),
+  date: z.string().optional(), // Accept any string date format (ISO, datetime-local, etc)
   participants: z.array(
     z.object({
       userId: z.string().uuid(),

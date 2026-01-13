@@ -245,10 +245,15 @@ export const getTransactions = async (
   if (filters.startDate || filters.endDate) {
     where.date = {};
     if (filters.startDate) {
+      // Start of day (00:00:00.000)
       where.date.gte = new Date(filters.startDate);
     }
     if (filters.endDate) {
-      where.date.lte = new Date(filters.endDate);
+      // End of day (23:59:59.999) - add one day and subtract 1ms
+      const endDate = new Date(filters.endDate);
+      endDate.setDate(endDate.getDate() + 1);
+      endDate.setMilliseconds(endDate.getMilliseconds() - 1);
+      where.date.lte = endDate;
     }
   }
 

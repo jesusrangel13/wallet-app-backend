@@ -27,6 +27,7 @@ interface CreateSharedExpenseData {
   description: string;
   categoryId?: string;
   receiptUrl?: string;
+  date?: string; // Optional: date of the expense (defaults to now if not provided)
   splitType: 'EQUAL' | 'PERCENTAGE' | 'EXACT' | 'SHARES';
   participants?: ParticipantData[];
 }
@@ -148,6 +149,7 @@ export const createSharedExpense = async (
       description: data.description,
       categoryId: data.categoryId,
       receiptUrl: data.receiptUrl,
+      date: data.date ? new Date(data.date) : undefined, // Use provided date or default to now
       splitType: finalSplitType,
       participants: {
         create: participantsWithPaymentStatus,
@@ -235,6 +237,7 @@ interface UpdateSharedExpenseData {
   description?: string;
   categoryId?: string;
   receiptUrl?: string;
+  date?: string; // Optional: date of the expense
   splitType?: 'EQUAL' | 'PERCENTAGE' | 'EXACT' | 'SHARES';
   participants?: ParticipantData[];
   paidByUserId?: string;
@@ -330,6 +333,7 @@ export const updateSharedExpense = async (
         description: data.description !== undefined ? data.description : expense.description,
         categoryId: data.categoryId !== undefined ? data.categoryId : expense.categoryId,
         receiptUrl: data.receiptUrl !== undefined ? data.receiptUrl : expense.receiptUrl,
+        date: data.date ? new Date(data.date) : undefined,
         splitType: finalSplitType,
         paidByUserId: finalPaidByUserId,
         participants: {

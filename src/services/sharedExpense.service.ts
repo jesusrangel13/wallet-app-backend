@@ -5,6 +5,13 @@ import { updateMonthlySummary } from './summary.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
 import { prisma } from '../utils/prisma';
 import logger from '../utils/logger';
+import { calculateSplit } from './expenseSplitCalculator.service';
+import {
+  fetchSettlementUsers,
+  determineSettlementAccounts,
+  verifySettlementAccounts,
+  fetchDebtCategories,
+} from './sharedExpenseSettlement.service';
 
 interface ParticipantData {
   userId: string;
@@ -95,52 +102,12 @@ export const createSharedExpense = async (
     throw new AppError(ErrorCodes.SHARED_EXPENSE_PARTICIPANTS_NOT_MEMBERS, 400);
   }
 
-  // Calculate amounts based on split type
-  let participantsWithAmounts: Array<{ userId: string; amountOwed: number }> = [];
-
-  // Use finalParticipants for calculation
-  const calculationParticipants = finalParticipants;
-
-  if (finalSplitType === 'EQUAL') {
-    const amountPerPerson = data.amount / calculationParticipants.length;
-    participantsWithAmounts = calculationParticipants.map((p) => ({
-      userId: p.userId,
-      amountOwed: amountPerPerson,
-    }));
-  } else if (finalSplitType === 'PERCENTAGE') {
-    const totalPercentage = calculationParticipants.reduce(
-      (sum, p) => sum + (p.percentage || 0),
-      0
-    );
-    if (Math.abs(totalPercentage - 100) > 0.01) {
-      throw new AppError(ErrorCodes.SHARED_EXPENSE_PERCENTAGE_INVALID, 400);
-    }
-    participantsWithAmounts = calculationParticipants.map((p) => ({
-      userId: p.userId,
-      amountOwed: (data.amount * (p.percentage || 0)) / 100,
-    }));
-  } else if (finalSplitType === 'EXACT') {
-    const totalAmount = calculationParticipants.reduce(
-      (sum, p) => sum + (p.amountOwed || 0),
-      0
-    );
-    if (Math.abs(totalAmount - data.amount) > 0.01) {
-      throw new AppError(ErrorCodes.SHARED_EXPENSE_EXACT_AMOUNT_INVALID, 400);
-    }
-    participantsWithAmounts = calculationParticipants.map((p) => ({
-      userId: p.userId,
-      amountOwed: p.amountOwed || 0,
-    }));
-  } else if (finalSplitType === 'SHARES') {
-    const totalShares = calculationParticipants.reduce(
-      (sum, p) => sum + (p.shares || 1),
-      0
-    );
-    participantsWithAmounts = calculationParticipants.map((p) => ({
-      userId: p.userId,
-      amountOwed: (data.amount * (p.shares || 1)) / totalShares,
-    }));
-  }
+  // Calculate amounts based on split type using extracted service
+  const participantsWithAmounts = calculateSplit(
+    data.amount,
+    finalSplitType,
+    finalParticipants
+  );
 
   // Get group for notifications
   const group = await prisma.group.findUnique({
@@ -330,49 +297,12 @@ export const updateSharedExpense = async (
     shares: undefined,
   }));
 
-  // Calculate amounts based on split type
-  let participantsWithAmounts: Array<{ userId: string; amountOwed: number }> = [];
-
-  if (finalSplitType === 'EQUAL') {
-    const amountPerPerson = finalAmount / finalParticipants.length;
-    participantsWithAmounts = finalParticipants.map((p) => ({
-      userId: p.userId,
-      amountOwed: amountPerPerson,
-    }));
-  } else if (finalSplitType === 'PERCENTAGE') {
-    const totalPercentage = finalParticipants.reduce(
-      (sum, p) => sum + (p.percentage || 0),
-      0
-    );
-    if (Math.abs(totalPercentage - 100) > 0.01) {
-      throw new AppError(ErrorCodes.SHARED_EXPENSE_PERCENTAGE_INVALID, 400);
-    }
-    participantsWithAmounts = finalParticipants.map((p) => ({
-      userId: p.userId,
-      amountOwed: (finalAmount * (p.percentage || 0)) / 100,
-    }));
-  } else if (finalSplitType === 'EXACT') {
-    const totalAmount = finalParticipants.reduce(
-      (sum, p) => sum + (p.amountOwed || 0),
-      0
-    );
-    if (Math.abs(totalAmount - finalAmount) > 0.01) {
-      throw new AppError(ErrorCodes.SHARED_EXPENSE_EXACT_AMOUNT_INVALID, 400);
-    }
-    participantsWithAmounts = finalParticipants.map((p) => ({
-      userId: p.userId,
-      amountOwed: p.amountOwed || 0,
-    }));
-  } else if (finalSplitType === 'SHARES') {
-    const totalShares = finalParticipants.reduce(
-      (sum, p) => sum + (p.shares || 1),
-      0
-    );
-    participantsWithAmounts = finalParticipants.map((p) => ({
-      userId: p.userId,
-      amountOwed: (finalAmount * (p.shares || 1)) / totalShares,
-    }));
-  }
+  // Calculate amounts based on split type using extracted service
+  const participantsWithAmounts = calculateSplit(
+    finalAmount,
+    finalSplitType,
+    finalParticipants
+  );
 
   // Update expense and participants in a transaction
   const updatedExpense = await prisma.$transaction(async (tx) => {
@@ -922,70 +852,31 @@ export const markParticipantAsPaid = async (
   // Determine roles: debtor is the participant, payee is who paid originally
   const debtorUserId = participantUserId;
   const payeeUserId = expense.paidByUserId;
-  const currentUserIsDebtor = userId === debtorUserId;
 
-  // Fetch both users with their default accounts
-  const [debtorUser, payeeUser] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: debtorUserId },
-      select: {
-        id: true,
-        name: true,
-        defaultSharedExpenseAccountId: true,
-      },
-    }),
-    prisma.user.findUnique({
-      where: { id: payeeUserId },
-      select: {
-        id: true,
-        name: true,
-        defaultSharedExpenseAccountId: true,
-      },
-    }),
-  ]);
+  // Fetch both users with their default accounts using extracted service
+  const users = await fetchSettlementUsers(debtorUserId, payeeUserId);
 
   // Determine which account IDs to use based on who initiated the payment
-  let debtorAccountId: string | null | undefined;
-  let payeeAccountId: string | null | undefined;
-
-  if (currentUserIsDebtor) {
-    // Debtor is initiating, use their selected account (or default)
-    debtorAccountId = accountId || debtorUser?.defaultSharedExpenseAccountId;
-    payeeAccountId = payeeUser?.defaultSharedExpenseAccountId;
-  } else {
-    // Payee is initiating (confirming payment), use their selected account (or default)
-    debtorAccountId = debtorUser?.defaultSharedExpenseAccountId;
-    payeeAccountId = accountId || payeeUser?.defaultSharedExpenseAccountId;
-  }
+  const { debtorAccountId, payeeAccountId } = determineSettlementAccounts(
+    userId,
+    debtorUserId,
+    accountId,
+    users
+  );
 
   // Only create transactions if both accounts are configured
   if (debtorAccountId && payeeAccountId) {
-    // Verify accounts exist and are active, checking ownership correctly
-    const [debtorAccount, payeeAccount] = await Promise.all([
-      prisma.account.findFirst({
-        where: { id: debtorAccountId, userId: debtorUserId, isArchived: false },
-      }),
-      prisma.account.findFirst({
-        where: { id: payeeAccountId, userId: payeeUserId, isArchived: false },
-      }),
-    ]);
+    // Verify accounts exist and are active using extracted service
+    const accounts = await verifySettlementAccounts(
+      debtorAccountId,
+      debtorUserId,
+      payeeAccountId,
+      payeeUserId
+    );
 
-    if (debtorAccount && payeeAccount) {
-      // Fetch the debt payment categories
-      const [debtPaymentCategory, debtCollectionCategory] = await Promise.all([
-        prisma.categoryTemplate.findFirst({
-          where: {
-            name: 'Pago de deuda',
-            type: 'EXPENSE',
-          },
-        }),
-        prisma.categoryTemplate.findFirst({
-          where: {
-            name: 'Cobro de deuda',
-            type: 'INCOME',
-          },
-        }),
-      ]);
+    if (accounts) {
+      // Fetch the debt payment categories using extracted service
+      const categories = await fetchDebtCategories();
 
       const transactionService = await import('./transaction.service');
       const amount = Number(participant.amountOwed);
@@ -997,8 +888,8 @@ export const markParticipantAsPaid = async (
           amount,
           type: 'EXPENSE',
           accountId: debtorAccountId,
-          categoryId: debtPaymentCategory?.id,
-          description: `Pago a ${payeeUser?.name} por "${expense.description}"`,
+          categoryId: categories.debtPaymentCategoryId,
+          description: `Pago a ${users.payee?.name} por "${expense.description}"`,
           date: new Date().toISOString(),
           sharedExpenseId: expenseId,
           tags: [],
@@ -1008,8 +899,8 @@ export const markParticipantAsPaid = async (
           amount,
           type: 'INCOME',
           accountId: payeeAccountId,
-          categoryId: debtCollectionCategory?.id,
-          description: `Recibido de ${debtorUser?.name} por "${expense.description}"`,
+          categoryId: categories.debtCollectionCategoryId,
+          description: `Recibido de ${users.debtor?.name} por "${expense.description}"`,
           date: new Date().toISOString(),
           sharedExpenseId: expenseId,
           tags: [],
@@ -1254,21 +1145,8 @@ export const settleAllBalance = async (
       // Determine who pays whom based on debt direction
       const isPayer = debtBetweenUsers.from.id === userId;
 
-      // Find the debt payment categories
-      const [debtPaymentCategory, debtCollectionCategory] = await Promise.all([
-        prisma.categoryTemplate.findFirst({
-          where: {
-            name: 'Pago de deuda',
-            type: 'EXPENSE',
-          },
-        }),
-        prisma.categoryTemplate.findFirst({
-          where: {
-            name: 'Cobro de deuda',
-            type: 'INCOME',
-          },
-        }),
-      ]);
+      // Find the debt payment categories using extracted service
+      const categories = await fetchDebtCategories();
 
       // Import transaction service at the top of the file if not already imported
       const transactionService = await import('./transaction.service');
@@ -1281,7 +1159,7 @@ export const settleAllBalance = async (
             amount: debtBetweenUsers.amount,
             type: 'EXPENSE',
             accountId: initiatorAccountId,
-            categoryId: debtPaymentCategory?.id,
+            categoryId: categories.debtPaymentCategoryId,
             description: `Pago de balance compartido a ${otherUser?.name}.`,
             date: new Date().toISOString(),
             sharedExpenseId: expenses.length > 0 ? expenses[0].id : undefined,
@@ -1292,7 +1170,7 @@ export const settleAllBalance = async (
             amount: debtBetweenUsers.amount,
             type: 'INCOME',
             accountId: otherUserAccountId,
-            categoryId: debtCollectionCategory?.id,
+            categoryId: categories.debtCollectionCategoryId,
             description: `Recibido de ${initiatorUser?.name} por balance compartido.`,
             date: new Date().toISOString(),
             sharedExpenseId: expenses.length > 0 ? expenses[0].id : undefined,
@@ -1308,7 +1186,7 @@ export const settleAllBalance = async (
             amount: debtBetweenUsers.amount,
             type: 'INCOME',
             accountId: initiatorAccountId,
-            categoryId: debtCollectionCategory?.id,
+            categoryId: categories.debtCollectionCategoryId,
             description: `Recibido de ${otherUser?.name} por balance compartido.`,
             date: new Date().toISOString(),
             sharedExpenseId: expenses.length > 0 ? expenses[0].id : undefined,
@@ -1319,7 +1197,7 @@ export const settleAllBalance = async (
             amount: debtBetweenUsers.amount,
             type: 'EXPENSE',
             accountId: otherUserAccountId,
-            categoryId: debtPaymentCategory?.id,
+            categoryId: categories.debtPaymentCategoryId,
             description: `Pago de balance compartido a ${initiatorUser?.name}.`,
             date: new Date().toISOString(),
             sharedExpenseId: expenses.length > 0 ? expenses[0].id : undefined,

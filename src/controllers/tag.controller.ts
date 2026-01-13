@@ -8,7 +8,7 @@ export const createTag = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const validatedData = createTagSchema.parse(req.body);
     const tag = await tagService.createTag(userId, validatedData);
 
@@ -28,7 +28,7 @@ export const getTags = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     // Extract pagination parameters
     const page = req.query.page ? Number(req.query.page) : undefined;
@@ -52,7 +52,7 @@ export const getTagById = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const tag = await tagService.getTagById(userId, id);
 
@@ -71,7 +71,7 @@ export const updateTag = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     const validatedData = updateTagSchema.parse(req.body);
     const tag = await tagService.updateTag(userId, id, validatedData);
@@ -92,7 +92,7 @@ export const deleteTag = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
     await tagService.deleteTag(userId, id);
 

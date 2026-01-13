@@ -1,5 +1,6 @@
 import { TransactionType } from '@prisma/client';
 import { UserCategoryService } from './userCategory.service';
+import logger from '../utils/logger';
 
 // Template-based category system - all legacy Category functions removed
 
@@ -15,7 +16,7 @@ export const getCategories = async (userId: string, type?: string) => {
       return await UserCategoryService.getUserCategoriesHierarchy(userId);
     }
   } catch (error) {
-    console.error('Error fetching template categories:', error);
+    logger.error('Error fetching template categories:', error);
     throw error;
   }
 };

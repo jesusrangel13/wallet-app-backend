@@ -8,7 +8,7 @@ export const getProfile = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const user = await userService.getProfile(userId);
 
     res.status(200).json({
@@ -26,7 +26,7 @@ export const updateProfile = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const user = await userService.updateProfile(userId, req.body);
 
     res.status(200).json({
@@ -45,7 +45,7 @@ export const deleteAccount = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const result = await userService.deleteAccount(userId);
 
     res.status(200).json({
@@ -63,7 +63,7 @@ export const getUserStats = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const stats = await userService.getUserStats(userId);
 
     res.status(200).json({
@@ -81,7 +81,7 @@ export const getMyBalances = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const month = req.query.month ? parseInt(req.query.month as string) : undefined;
     const year = req.query.year ? parseInt(req.query.year as string) : undefined;
 
@@ -102,7 +102,7 @@ export const updateDefaultSharedExpenseAccount = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { accountId } = req.body;
 
     const user = await userService.updateDefaultSharedExpenseAccount(

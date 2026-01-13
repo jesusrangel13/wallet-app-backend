@@ -10,7 +10,7 @@ export const getAllNotifications = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     // Extract pagination parameters
     const page = req.query.page ? Number(req.query.page) : undefined;
@@ -37,7 +37,7 @@ export const getUnreadNotifications = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     const notifications = await notificationService.getUnreadNotifications(userId);
 
@@ -59,7 +59,7 @@ export const getUnreadCount = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     const count = await notificationService.getUnreadCount(userId);
 
@@ -81,7 +81,7 @@ export const markAsRead = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
 
     const notification = await notificationService.markAsRead(id, userId);
@@ -105,7 +105,7 @@ export const markAllAsRead = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     const result = await notificationService.markAllAsRead(userId);
 
@@ -128,7 +128,7 @@ export const deleteNotification = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { id } = req.params;
 
     const result = await notificationService.deleteNotification(id, userId);
@@ -152,7 +152,7 @@ export const deleteReadNotifications = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     const result = await notificationService.deleteReadNotifications(userId);
 

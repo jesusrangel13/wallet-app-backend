@@ -1,11 +1,10 @@
-import { PrismaClient, LoanStatus } from '@prisma/client';
+import { LoanStatus } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import * as transactionService from './transaction.service';
 import { searchCategoriesByName } from './categoryResolver.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 interface CreateLoanData {
   borrowerName: string;

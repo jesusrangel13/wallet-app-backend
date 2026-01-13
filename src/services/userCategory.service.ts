@@ -1,9 +1,9 @@
-import { PrismaClient, TransactionType } from '@prisma/client';
+import { TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import { CategoryTemplateService } from './categoryTemplate.service';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
+import logger from '../utils/logger';
 
 export interface MergedCategory {
   id: string; // ID del override o template
@@ -61,13 +61,14 @@ export class UserCategoryService {
       });
 
       // Agregar categorías custom standalone (sin template, sin parent)
+      // Incluye tanto isCustom:true como isCustom:false (categorías override sin template)
       const customCategories = overrides
-        .filter(o => o.templateId === null && o.isCustom && !o.parentOverrideId && o.isActive)
+        .filter(o => o.templateId === null && !o.parentOverrideId && o.isActive)
         .map(custom => this.mergeCustomCategory(custom, overrides));
 
       return [...mergedTemplates, ...customCategories];
     } catch (error) {
-      console.error(`Error fetching user categories for ${userId}:`, error);
+      logger.error(`Error fetching user categories for ${userId}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -81,7 +82,7 @@ export class UserCategoryService {
 
       return allCategories.filter(cat => cat.type === type);
     } catch (error) {
-      console.error(`Error fetching user categories for type ${type}:`, error);
+      logger.error(`Error fetching user categories for type ${type}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -135,7 +136,7 @@ export class UserCategoryService {
 
       return null;
     } catch (error) {
-      console.error(`Error fetching category ${categoryId}:`, error);
+      logger.error(`Error fetching category ${categoryId}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -170,7 +171,7 @@ export class UserCategoryService {
 
       return flat;
     } catch (error) {
-      console.error(`Error fetching flat categories for ${userId}:`, error);
+      logger.error(`Error fetching flat categories for ${userId}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -231,7 +232,7 @@ export class UserCategoryService {
       if (error.code === 'P2002') {
         throw new AppError(ErrorCodes.CATEGORY_ALREADY_EXISTS, 400);
       }
-      console.error(`Error creating custom category for ${userId}:`, error);
+      logger.error(`Error creating custom category for ${userId}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -272,7 +273,7 @@ export class UserCategoryService {
       });
     } catch (error: any) {
       if (error instanceof AppError) throw error;
-      console.error(`Error updating category ${categoryId}:`, error);
+      logger.error(`Error updating category ${categoryId}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -305,7 +306,7 @@ export class UserCategoryService {
       });
     } catch (error: any) {
       if (error instanceof AppError) throw error;
-      console.error(`Error toggling category ${categoryId}:`, error);
+      logger.error(`Error toggling category ${categoryId}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -366,7 +367,7 @@ export class UserCategoryService {
       return override;
     } catch (error: any) {
       if (error instanceof AppError) throw error;
-      console.error(`Error overriding template ${templateId}:`, error);
+      logger.error(`Error overriding template ${templateId}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -390,7 +391,7 @@ export class UserCategoryService {
       });
     } catch (error: any) {
       if (error instanceof AppError) throw error;
-      console.error(`Error resetting category ${categoryId}:`, error);
+      logger.error(`Error resetting category ${categoryId}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -420,7 +421,7 @@ export class UserCategoryService {
       });
     } catch (error: any) {
       if (error instanceof AppError) throw error;
-      console.error(`Error deleting category ${categoryId}:`, error);
+      logger.error(`Error deleting category ${categoryId}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -528,7 +529,7 @@ export class UserCategoryService {
       });
     } catch (error: any) {
       if (error instanceof AppError) throw error;
-      console.error(`Error creating custom subcategory for ${userId}:`, error);
+      logger.error(`Error creating custom subcategory for ${userId}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -577,9 +578,9 @@ export class UserCategoryService {
       this.mergeTemplate(sub, overridesByTemplateId, userId, allOverrides)
     ) || [];
 
-    // Si este es un template padre (no una subcategoría de template), agregar custom subcategorías creadas bajo él
+    // Si existe un override para este template, agregar custom subcategorías creadas bajo él
     const customSubcategories: MergedCategory[] = [];
-    if (override && !template.parentTemplateId) {
+    if (override) {
       // Buscar custom subcategorías que fueron creadas bajo este override
       const customSubs = allOverrides.filter(
         o => o.parentOverrideId === override.id && o.isActive && o.isCustom

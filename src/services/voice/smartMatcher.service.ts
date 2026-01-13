@@ -1,4 +1,5 @@
 import { prisma } from '../../utils/prisma';
+import logger from '../../utils/logger';
 
 export class SmartMatcherService {
 
@@ -66,7 +67,7 @@ export class SmartMatcherService {
                 }
             });
         } catch (error) {
-            console.error('Failed to learn pattern:', error);
+            logger.error('Failed to learn pattern:', error);
         }
     }
 

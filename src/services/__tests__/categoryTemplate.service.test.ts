@@ -5,9 +5,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals'
 import { CategoryTemplateService } from '../categoryTemplate.service'
-import { PrismaClient } from '@prisma/client'
-
-const prisma = new PrismaClient()
+import { prisma } from '../../utils/prisma'
 
 describe('CategoryTemplateService', () => {
   beforeAll(async () => {

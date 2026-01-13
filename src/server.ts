@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
 import { specs as swaggerSpecs } from './config/swagger';
 import { requestLogger } from './middleware/requestLogger';
+import { sanitizeMiddleware } from './middleware/sanitize';
 import healthRoutes from './routes/health.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { notFoundHandler } from './middleware/notFoundHandler';
@@ -27,6 +28,7 @@ import dashboardPreferenceRoutes from './routes/dashboardPreference.routes';
 import loanRoutes from './routes/loan.routes';
 import voiceRoutes from './routes/voice.routes';
 import { CategoryTemplateService } from './services/categoryTemplate.service';
+import logger from './utils/logger';
 
 // Load environment variables (via env.ts)
 
@@ -67,6 +69,10 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Input sanitization - Applied globally to prevent XSS attacks
+// Sanitizes req.body, req.query, and req.params
+app.use(sanitizeMiddleware);
+
 // Health check
 app.use('/health', healthRoutes);
 
@@ -97,7 +103,7 @@ v1Router.use('/loans', loanRoutes);
 v1Router.use('/import', importRoutes);
 v1Router.use('/dashboard', dashboardRoutes);
 v1Router.use('/notifications', notificationRoutes);
-v1Router.use('/users', dashboardPreferenceRoutes); // Check if this conflicts with /users above. It seems to be dashboard preferences.
+v1Router.use('/dashboard-preferences', dashboardPreferenceRoutes); // ✅ OPT-9: Fixed route conflict - moved from /users to dedicated path
 v1Router.use('/voice', voiceRoutes);
 
 // Mount v1 router
@@ -115,17 +121,17 @@ app.use(errorHandler);
   try {
     await CategoryTemplateService.initializeDefaultTemplates();
   } catch (error) {
-    console.error('⚠️  Failed to initialize category templates:', error);
+    logger.error('Failed to initialize category templates:', error);
     // Don't block server startup if this fails
   }
 })();
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📝 Environment: ${env.NODE_ENV}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-  console.log(`📚 API Docs: http://localhost:${PORT}/api-docs`);
+  logger.info(`Server running on port ${PORT}`);
+  logger.info(`Environment: ${env.NODE_ENV}`);
+  logger.info(`Health check: http://localhost:${PORT}/health`);
+  logger.info(`API Docs: http://localhost:${PORT}/api-docs`);
 });
 
 export default app;

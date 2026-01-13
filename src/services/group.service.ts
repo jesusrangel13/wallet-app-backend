@@ -1,10 +1,8 @@
-import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import * as notificationService from './notification.service';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 // Helper function to transform group data with expense counts
 function transformGroupWithCounts(group: any) {
@@ -681,7 +679,7 @@ export const updateDefaultSplit = async (
   await prisma.group.update({
     where: { id: groupId },
     data: {
-      defaultSplitType: data.defaultSplitType as any,
+      defaultSplitType: data.defaultSplitType as 'EQUAL' | 'PERCENTAGE' | 'EXACT' | 'SHARES',
     },
   });
 

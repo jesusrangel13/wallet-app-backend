@@ -1,9 +1,7 @@
-import { PrismaClient } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { hashPassword } from '../utils/password';
 import { ErrorCodes } from '../constants/errorCodes';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 interface UpdateUserData {
   name?: string;

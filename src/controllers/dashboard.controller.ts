@@ -7,7 +7,7 @@ export const getCashFlow = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const months = req.query.months ? parseInt(req.query.months as string) : 6;
     const month = req.query.month !== undefined ? parseInt(req.query.month as string) : undefined;
     const year = req.query.year !== undefined ? parseInt(req.query.year as string) : undefined;
@@ -36,7 +36,7 @@ export const getExpensesByCategory = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
     const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
@@ -58,7 +58,7 @@ export const getBalanceHistory = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const days = req.query.days ? parseInt(req.query.days as string) : 30;
     const month = req.query.month !== undefined ? parseInt(req.query.month as string) : undefined;
     const year = req.query.year !== undefined ? parseInt(req.query.year as string) : undefined;
@@ -87,7 +87,7 @@ export const getGroupBalances = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
     const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
@@ -109,7 +109,7 @@ export const getAccountBalances = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
 
     const data = await dashboardService.getAccountBalances(userId);
 
@@ -128,7 +128,7 @@ export const getDashboardSummary = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
     const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
@@ -150,7 +150,7 @@ export const getExpensesByParentCategory = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
     const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
@@ -172,7 +172,7 @@ export const getPersonalExpenses = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
     const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
@@ -194,7 +194,7 @@ export const getSharedExpensesTotal = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
     const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
@@ -216,7 +216,7 @@ export const getMonthlySavings = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
     const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
@@ -238,7 +238,7 @@ export const getExpensesByTag = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
     const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
@@ -260,7 +260,7 @@ export const getTopTags = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const now = new Date();
     const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
     const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
@@ -283,7 +283,7 @@ export const getTagTrend = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const months = req.query.months ? parseInt(req.query.months as string) : 6;
     const tagIds = req.query.tagIds ?
       (Array.isArray(req.query.tagIds) ? req.query.tagIds : [req.query.tagIds]) as string[] :

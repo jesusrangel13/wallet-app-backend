@@ -2,10 +2,12 @@ import Groq from 'groq-sdk';
 import { ContextAssemblyService } from './contextAssembly.service';
 import { SmartMatcherService } from './smartMatcher.service';
 import currency from 'currency.js';
+import logger from '../../utils/logger';
+import { env } from '../../config/env';
 const Sugar = require('sugar-date');
 require('sugar-date/locales/es'); // Import Spanish locale
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const groq = new Groq({ apiKey: env.GROQ_API_KEY });
 const contextService = new ContextAssemblyService();
 const smartMatcher = new SmartMatcherService();
 
@@ -39,7 +41,7 @@ export class VoiceTransactionService {
         try {
             context = await contextService.getUserContext(userId);
         } catch (error) {
-            console.warn("⚠️ Failed to retrieve user context (DB might be down). Proceeding with default context.", error);
+            logger.warn("⚠️ Failed to retrieve user context (DB might be down). Proceeding with default context.", error);
             context = {
                 current_date: new Date().toISOString(),
                 currency_preference: 'USD', // Fallback
@@ -76,7 +78,7 @@ export class VoiceTransactionService {
                     resolvedCategoryId = match.id;
                 }
             } catch (error) {
-                console.warn("⚠️ Failed to resolve category via SmartMatcher (DB might be down). Ignoring.", error);
+                logger.warn("⚠️ Failed to resolve category via SmartMatcher (DB might be down). Ignoring.", error);
             }
         }
 
@@ -88,7 +90,7 @@ export class VoiceTransactionService {
                     resolvedAccountId = match.id;
                 }
             } catch (error) {
-                console.warn("⚠️ Failed to resolve account via SmartMatcher. Ignoring.", error);
+                logger.warn("⚠️ Failed to resolve account via SmartMatcher. Ignoring.", error);
             }
         }
 
@@ -97,7 +99,7 @@ export class VoiceTransactionService {
             try {
                 resolvedTagIds = await smartMatcher.matchTags(userId, aiResponse.tags);
             } catch (error) {
-                console.warn("⚠️ Failed to resolve tags via SmartMatcher. Ignoring.", error);
+                logger.warn("⚠️ Failed to resolve tags via SmartMatcher. Ignoring.", error);
             }
         }
 
@@ -110,7 +112,7 @@ export class VoiceTransactionService {
                     resolvedGroupId = match.id;
                 }
             } catch (error) {
-                console.warn("⚠️ Failed to resolve group via SmartMatcher. Ignoring.", error);
+                logger.warn("⚠️ Failed to resolve group via SmartMatcher. Ignoring.", error);
             }
         }
 
@@ -183,7 +185,7 @@ export class VoiceTransactionService {
             if (!content) throw new Error("Empty response from AI");
             return JSON.parse(content);
         } catch (error) {
-            console.error("AI Parsing Error:", error);
+            logger.error("AI Parsing Error:", error);
             // Fallback or re-throw
             throw new Error("Failed to parse transaction via AI");
         }

@@ -1,4 +1,5 @@
 import winston from 'winston';
+import { env } from '../config/env';
 
 const levels = {
     error: 0,
@@ -9,8 +10,7 @@ const levels = {
 };
 
 const level = () => {
-    const env = process.env.NODE_ENV || 'development';
-    return env === 'development' ? 'debug' : 'warn';
+    return env.NODE_ENV === 'development' ? 'debug' : 'warn';
 };
 
 const colors = {

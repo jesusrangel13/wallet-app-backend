@@ -1,5 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import { ErrorCodes, type ErrorCode } from '../constants/errorCodes';
+import logger from '../utils/logger';
+import { env } from '../config/env';
+
+interface PrismaError extends Error {
+  code?: string;
+  meta?: Record<string, unknown>;
+}
 
 export class AppError extends Error {
   statusCode: number;
@@ -32,7 +39,8 @@ export const errorHandler = (
 
   // Prisma errors
   if (err.name === 'PrismaClientKnownRequestError') {
-    console.error('Prisma Error:', (err as any).code, (err as any).meta);
+    const prismaError = err as PrismaError;
+    logger.error('Prisma Error', { code: prismaError.code, meta: prismaError.meta });
     return res.status(400).json({
       status: 'error',
       errorCode: ErrorCodes.DATABASE_ERROR,
@@ -58,12 +66,12 @@ export const errorHandler = (
   }
 
   // Generic error
-  console.error('❌ Error:', err);
+  logger.error('Unhandled error', { error: err });
 
   res.status(500).json({
     status: 'error',
     errorCode: ErrorCodes.INTERNAL_SERVER_ERROR,
-    message: process.env.NODE_ENV === 'development'
+    message: env.NODE_ENV === 'development'
       ? err.message
       : 'Internal server error'
   });

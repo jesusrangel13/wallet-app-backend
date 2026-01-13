@@ -1,9 +1,9 @@
-import { PrismaClient, TransactionType } from '@prisma/client';
+import { TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import { DEFAULT_CATEGORY_TEMPLATES } from '../data/categoryTemplates';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
+import logger from '../utils/logger';
 
 // Cache para templates (TTL: 24 horas)
 const CACHE_KEY = 'category_templates';
@@ -30,13 +30,13 @@ export class CategoryTemplateService {
       const existingCount = await prisma.categoryTemplate.count();
 
       if (existingCount > 0) {
-        console.log(`✓ CategoryTemplates already initialized (${existingCount} templates found)`);
+        logger.info(`CategoryTemplates already initialized (${existingCount} templates found)`);
         // Check if all templates from DEFAULT_CATEGORY_TEMPLATES exist
         await this.addMissingTemplates();
         return;
       }
 
-      console.log('Initializing 84 default category templates...');
+      logger.info('Initializing 84 default category templates...');
 
       // Crear un mapa de templates por nombre para referencias de parents
       const templatesByName = new Map<string, string>();
@@ -66,7 +66,7 @@ export class CategoryTemplateService {
         const parentId = templatesByName.get(template.parentName!);
 
         if (!parentId) {
-          console.warn(`Parent template not found for: ${template.name} (parent: ${template.parentName})`);
+          logger.warn(`Parent template not found for: ${template.name} (parent: ${template.parentName})`);
           continue;
         }
 
@@ -84,9 +84,9 @@ export class CategoryTemplateService {
         templatesByName.set(`${template.parentName}/${template.name}`, created.id);
       }
 
-      console.log(`✓ Successfully initialized ${templatesByName.size} category templates`);
+      logger.info(`Successfully initialized ${templatesByName.size} category templates`);
     } catch (error) {
-      console.error('Error initializing default templates:', error);
+      logger.error('Error initializing default templates:', error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -133,7 +133,7 @@ export class CategoryTemplateService {
 
       return hierarchical;
     } catch (error) {
-      console.error('Error fetching template hierarchy:', error);
+      logger.error('Error fetching template hierarchy:', error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -159,7 +159,7 @@ export class CategoryTemplateService {
 
       return templates.map(t => this.mapToHierarchy(t));
     } catch (error) {
-      console.error(`Error fetching templates for type ${type}:`, error);
+      logger.error(`Error fetching templates for type ${type}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -182,7 +182,7 @@ export class CategoryTemplateService {
 
       return this.mapToHierarchy(template);
     } catch (error) {
-      console.error(`Error fetching template ${id}:`, error);
+      logger.error(`Error fetching template ${id}:`, error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -213,7 +213,7 @@ export class CategoryTemplateService {
         orderBy: [{ type: 'asc' }, { orderIndex: 'asc' }],
       });
     } catch (error) {
-      console.error('Error fetching all templates:', error);
+      logger.error('Error fetching all templates:', error);
       throw new AppError(ErrorCodes.INTERNAL_SERVER_ERROR, 500);
     }
   }
@@ -225,9 +225,9 @@ export class CategoryTemplateService {
     try {
       // TODO: Implementar cuando Redis esté disponible
       // await redis.del(CACHE_KEY);
-      console.log('Category templates cache invalidated');
+      logger.info('Category templates cache invalidated');
     } catch (error) {
-      console.warn('Error invalidating template cache:', error);
+      logger.warn('Error invalidating template cache:', error);
     }
   }
 
@@ -256,17 +256,30 @@ export class CategoryTemplateService {
    */
   static async addMissingTemplates(): Promise<void> {
     try {
-      // Get all existing templates
+      // Get all existing templates with parent info
       const existingTemplates = await prisma.categoryTemplate.findMany({
-        select: { name: true, id: true },
+        select: {
+          name: true,
+          id: true,
+          parent: {
+            select: { name: true }
+          }
+        },
       });
 
-      const existingNames = new Set(existingTemplates.map(t => t.name));
+      // Create a unique key for each template (name + parent name)
+      const existingKeys = new Set(
+        existingTemplates.map(t => {
+          const parentName = t.parent?.name || null;
+          return parentName ? `${parentName}/${t.name}` : t.name;
+        })
+      );
+
       const templatesByName = new Map(existingTemplates.map(t => [t.name, t.id]));
 
       // Find parent categories to add
       const missingParents = DEFAULT_CATEGORY_TEMPLATES
-        .filter(t => !t.parentName && !existingNames.has(t.name));
+        .filter(t => !t.parentName && !existingKeys.has(t.name));
 
       // Add missing parent templates
       for (const template of missingParents) {
@@ -282,19 +295,23 @@ export class CategoryTemplateService {
           },
         });
         templatesByName.set(template.name, created.id);
-        console.log(`✓ Added missing parent template: ${template.name}`);
+        logger.info(`Added missing parent template: ${template.name}`);
       }
 
       // Find child categories to add
       const missingChildren = DEFAULT_CATEGORY_TEMPLATES
-        .filter(t => t.parentName && !existingNames.has(t.name));
+        .filter(t => {
+          if (!t.parentName) return false;
+          const key = `${t.parentName}/${t.name}`;
+          return !existingKeys.has(key);
+        });
 
       // Add missing child templates
       for (const template of missingChildren) {
         const parentId = templatesByName.get(template.parentName!);
 
         if (!parentId) {
-          console.warn(`Parent template not found for: ${template.name} (parent: ${template.parentName})`);
+          logger.warn(`Parent template not found for: ${template.name} (parent: ${template.parentName})`);
           continue;
         }
 
@@ -309,15 +326,15 @@ export class CategoryTemplateService {
             parentTemplateId: parentId,
           },
         });
-        console.log(`✓ Added missing child template: ${template.name} (parent: ${template.parentName})`);
+        logger.info(`Added missing child template: ${template.name} (parent: ${template.parentName})`);
       }
 
       const totalAdded = missingParents.length + missingChildren.length;
       if (totalAdded > 0) {
-        console.log(`✓ Added ${totalAdded} missing category templates`);
+        logger.info(`Added ${totalAdded} missing category templates`);
       }
     } catch (error) {
-      console.error('Error adding missing templates:', error);
+      logger.error('Error adding missing templates:', error);
     }
   }
 }

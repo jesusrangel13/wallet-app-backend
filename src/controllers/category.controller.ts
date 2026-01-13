@@ -10,7 +10,7 @@ export const getCategories = async (
   next: NextFunction
 ) => {
   try {
-    const userId = (req as any).user.userId;
+    const userId = req.user!.userId;
     const { type } = req.query;
 
     const categories = await categoryService.getCategories(userId, type as string | undefined);

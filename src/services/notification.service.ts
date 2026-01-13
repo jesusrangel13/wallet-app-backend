@@ -1,9 +1,8 @@
-import { PrismaClient, NotificationType } from '@prisma/client';
+import { NotificationType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
 import { PaginationParams, calculatePagination, calculateSkip } from '../@types/pagination.types';
-
-const prisma = new PrismaClient();
+import { prisma } from '../utils/prisma';
 
 interface CreateNotificationData {
   userId: string;

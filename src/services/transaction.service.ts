@@ -1,7 +1,6 @@
-import { PrismaClient, TransactionType } from '@prisma/client';
+import { TransactionType } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler';
 import { ErrorCodes } from '../constants/errorCodes';
-import { UserCategoryService } from './userCategory.service';
 import {
   resolveCategoryById,
   resolveCategoriesBatch,
@@ -9,9 +8,14 @@ import {
   searchCategoriesByName,
 } from './categoryResolver.service';
 import { updateMonthlySummary } from './summary.service';
+import { prisma } from '../utils/prisma';
+import logger from '../utils/logger';
+import {
+  calculateBalanceChange,
+  updateAccountBalance as updateAccountBalanceHelper,
+} from './transactionBalance.service';
 
 // Template-based category system is now the default system
-const prisma = new PrismaClient();
 
 interface CreateTransactionData {
   accountId: string;
@@ -111,7 +115,7 @@ export const createTransaction = async (
   }
 
   if (data.categoryId && !categoryInfo) {
-    console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
+    logger.error(`❌ Category validation failed for ID: ${data.categoryId}`);
     throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
   }
 
@@ -174,13 +178,8 @@ export const createTransaction = async (
       },
     });
 
-    // Calculate balance changes
-    let balanceChange = data.amount;
-    if (account.type === 'CREDIT') {
-      balanceChange = data.type === 'INCOME' ? data.amount : -data.amount;
-    } else {
-      balanceChange = data.type === 'INCOME' ? data.amount : -data.amount;
-    }
+    // Calculate and update balance changes using extracted service
+    const balanceChange = calculateBalanceChange(account.type, data.type, data.amount);
 
     // Update source account balance
     await tx.account.update({
@@ -190,7 +189,7 @@ export const createTransaction = async (
 
     // For transfers, update destination account balance
     if (data.type === 'TRANSFER' && toAccount) {
-      const toBalanceChange = toAccount.type === 'CREDIT' ? data.amount : data.amount;
+      const toBalanceChange = calculateBalanceChange(toAccount.type, 'INCOME', data.amount);
       await tx.account.update({
         where: { id: toAccount.id },
         data: { balance: { increment: toBalanceChange } },
@@ -211,7 +210,7 @@ export const createTransaction = async (
       const matcher = new SmartMatcherService();
       // We learn that this PAYEE maps to this CATEGORY
       matcher.learn(userId, data.payee!, data.categoryId!, data.payee);
-    }).catch(err => console.error("Failed to trigger smart learning", err));
+    }).catch(err => logger.error("Failed to trigger smart learning", err));
   }
 
   // Update monthly summary
@@ -220,56 +219,8 @@ export const createTransaction = async (
   return { ...result, category: categoryInfo };
 };
 
-// Helper function to update account balance considering credit cards
-async function updateAccountBalance(
-  accountId: string,
-  accountType: string,
-  transactionType: TransactionType,
-  amount: number,
-  operation: 'add' | 'subtract'
-) {
-  const account = await prisma.account.findUnique({
-    where: { id: accountId },
-    select: { balance: true, creditLimit: true, type: true },
-  });
-
-  if (!account) {
-    throw new AppError(ErrorCodes.ACCOUNT_NOT_FOUND, 404);
-  }
-
-  let balanceChange = amount;
-
-  if (accountType === 'CREDIT') {
-    // For credit cards, balance represents AVAILABLE credit
-    if (transactionType === 'EXPENSE') {
-      // Expenses reduce available credit
-      balanceChange = -amount;
-    } else if (transactionType === 'INCOME') {
-      // Payments increase available credit
-      balanceChange = amount;
-    } else if (transactionType === 'TRANSFER') {
-      // Transfers out reduce available credit
-      balanceChange = -amount;
-    }
-  } else {
-    // For other account types (CASH, DEBIT, SAVINGS, INVESTMENT)
-    if (transactionType === 'EXPENSE' || transactionType === 'TRANSFER') {
-      balanceChange = -amount;
-    } else if (transactionType === 'INCOME') {
-      balanceChange = amount;
-    }
-  }
-
-  // If operation is subtract, reverse the change
-  if (operation === 'subtract') {
-    balanceChange = -balanceChange;
-  }
-
-  await prisma.account.update({
-    where: { id: accountId },
-    data: { balance: { increment: balanceChange } },
-  });
-}
+// NOTE: updateAccountBalance function has been moved to transactionBalance.service.ts
+// All calls now use updateAccountBalanceHelper from the imported service
 
 export const getTransactions = async (
   userId: string,
@@ -493,41 +444,41 @@ export const updateTransaction = async (
     }
 
     // Revert balance change on old account
-    await updateAccountBalance(
-      existingTransaction.accountId,
-      existingTransaction.account.type,
-      existingTransaction.type,
-      Number(existingTransaction.amount),
-      'subtract'
-    );
+    await updateAccountBalanceHelper({
+      accountId: existingTransaction.accountId,
+      accountType: existingTransaction.account.type,
+      transactionType: existingTransaction.type,
+      amount: Number(existingTransaction.amount),
+      operation: 'subtract',
+    });
 
     // Apply balance change to new account
-    await updateAccountBalance(
-      newAccount.id,
-      newAccount.type,
-      data.type || existingTransaction.type,
-      data.amount || Number(existingTransaction.amount),
-      'add'
-    );
+    await updateAccountBalanceHelper({
+      accountId: newAccount.id,
+      accountType: newAccount.type,
+      transactionType: data.type || existingTransaction.type,
+      amount: data.amount || Number(existingTransaction.amount),
+      operation: 'add',
+    });
   } else if (data.amount !== undefined || data.type !== undefined) {
     // If amount or type is changing, update balance
     // Revert old balance change
-    await updateAccountBalance(
-      existingTransaction.accountId,
-      existingTransaction.account.type,
-      existingTransaction.type,
-      Number(existingTransaction.amount),
-      'subtract'
-    );
+    await updateAccountBalanceHelper({
+      accountId: existingTransaction.accountId,
+      accountType: existingTransaction.account.type,
+      transactionType: existingTransaction.type,
+      amount: Number(existingTransaction.amount),
+      operation: 'subtract',
+    });
 
     // Apply new balance change
-    await updateAccountBalance(
-      existingTransaction.accountId,
-      existingTransaction.account.type,
-      data.type || existingTransaction.type,
-      data.amount || Number(existingTransaction.amount),
-      'add'
-    );
+    await updateAccountBalanceHelper({
+      accountId: existingTransaction.accountId,
+      accountType: existingTransaction.account.type,
+      transactionType: data.type || existingTransaction.type,
+      amount: data.amount || Number(existingTransaction.amount),
+      operation: 'add',
+    });
   }
 
   // Handle transfer account changes
@@ -540,13 +491,13 @@ export const updateTransaction = async (
     ) {
       // Revert old toAccount balance
       if (existingTransaction.toAccount) {
-        await updateAccountBalance(
-          existingTransaction.toAccountId,
-          existingTransaction.toAccount.type,
-          'INCOME',
-          Number(existingTransaction.amount),
-          'subtract'
-        );
+        await updateAccountBalanceHelper({
+          accountId: existingTransaction.toAccountId,
+          accountType: existingTransaction.toAccount.type,
+          transactionType: 'INCOME',
+          amount: Number(existingTransaction.amount),
+          operation: 'subtract',
+        });
       }
 
       // Apply to new toAccount
@@ -554,13 +505,13 @@ export const updateTransaction = async (
         where: { id: data.toAccountId },
       });
       if (newToAccount) {
-        await updateAccountBalance(
-          newToAccount.id,
-          newToAccount.type,
-          'INCOME',
-          data.amount || Number(existingTransaction.amount),
-          'add'
-        );
+        await updateAccountBalanceHelper({
+          accountId: newToAccount.id,
+          accountType: newToAccount.type,
+          transactionType: 'INCOME',
+          amount: data.amount || Number(existingTransaction.amount),
+          operation: 'add',
+        });
       }
     }
   }
@@ -571,7 +522,7 @@ export const updateTransaction = async (
     const isValidCategory = await validateCategoryId(data.categoryId, userId);
 
     if (!isValidCategory) {
-      console.error(`❌ Category validation failed for ID: ${data.categoryId}`);
+      logger.error(`❌ Category validation failed for ID: ${data.categoryId}`);
       throw new AppError(ErrorCodes.CATEGORY_NOT_FOUND, 404);
     }
   }
@@ -722,7 +673,7 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
     const normalizedRequestingUserId = userId.trim().toLowerCase();
 
     // DEBUG: Log detallado para entender el problema
-    console.log('🔍 DELETE SHARED EXPENSE - DEBUG INFO:', {
+    logger.debug('DELETE SHARED EXPENSE - DEBUG INFO', {
       sharedExpenseId: sharedExpense.id,
       paidByUserId: sharedExpense.paidByUserId,
       paidByUserIdLength: sharedExpense.paidByUserId.length,
@@ -750,23 +701,23 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
     const result = await prisma.$transaction(async (tx) => {
       // 1. Revert balances for ALL linked transactions
       for (const trans of sharedExpense.transactions) {
-        await updateAccountBalance(
-          trans.accountId,
-          trans.account.type,
-          trans.type,
-          Number(trans.amount),
-          'subtract'
-        );
+        await updateAccountBalanceHelper({
+          accountId: trans.accountId,
+          accountType: trans.account.type,
+          transactionType: trans.type,
+          amount: Number(trans.amount),
+          operation: 'subtract',
+        });
 
         // If it's a transfer, revert destination account
         if (trans.type === 'TRANSFER' && trans.toAccountId && trans.toAccount) {
-          await updateAccountBalance(
-            trans.toAccountId,
-            trans.toAccount.type,
-            'INCOME',
-            Number(trans.amount),
-            'subtract'
-          );
+          await updateAccountBalanceHelper({
+            accountId: trans.toAccountId,
+            accountType: trans.toAccount.type,
+            transactionType: 'INCOME',
+            amount: Number(trans.amount),
+            operation: 'subtract',
+          });
         }
       }
 
@@ -796,15 +747,14 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
     // Update monthly summaries for all participants (outside of transaction)
     // The previous transaction block returns the participants and date needed
     if (result && 'participants' in result) {
-      const typedResult = result as any; // Type assertion needed or better typing
-      const participants = typedResult.participants;
-      const expenseDate = typedResult.date;
+      const participants = result.participants;
+      const expenseDate = result.date;
 
       for (const p of participants) {
         await updateMonthlySummary(p.userId, expenseDate);
       }
       // Also update the payer (if not in participants list, though usually is)
-      if (!participants.find((p: any) => p.userId === sharedExpense.paidByUserId)) {
+      if (!participants.find(p => p.userId === sharedExpense.paidByUserId)) {
         await updateMonthlySummary(sharedExpense.paidByUserId, expenseDate);
       }
     }
@@ -814,23 +764,23 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
 
   // If NOT a shared expense, continue with normal deletion logic
   // Revert balance change
-  await updateAccountBalance(
-    transaction.accountId,
-    transaction.account.type,
-    transaction.type,
-    Number(transaction.amount),
-    'subtract'
-  );
+  await updateAccountBalanceHelper({
+    accountId: transaction.accountId,
+    accountType: transaction.account.type,
+    transactionType: transaction.type,
+    amount: Number(transaction.amount),
+    operation: 'subtract',
+  });
 
   // For transfers, revert destination account
   if (transaction.type === 'TRANSFER' && transaction.toAccountId && transaction.toAccount) {
-    await updateAccountBalance(
-      transaction.toAccountId,
-      transaction.toAccount.type,
-      'INCOME',
-      Number(transaction.amount),
-      'subtract'
-    );
+    await updateAccountBalanceHelper({
+      accountId: transaction.toAccountId,
+      accountType: transaction.toAccount.type,
+      transactionType: 'INCOME',
+      amount: Number(transaction.amount),
+      operation: 'subtract',
+    });
   }
 
   // Delete transaction (tags will be deleted automatically due to cascade)
@@ -1003,7 +953,7 @@ export const bulkDeleteTransactions = async (
       results.push({ transactionId, success: true, ...result });
     } catch (error: any) {
       // If deletion fails (e.g., no permission to delete shared expense), log and continue
-      console.error(`Error deleting transaction ${transactionId}:`, error.message);
+      logger.error(`Error deleting transaction ${transactionId}:`, error.message);
       errors.push({
         transactionId,
         success: false,

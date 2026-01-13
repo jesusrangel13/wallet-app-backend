@@ -61,8 +61,9 @@ export class UserCategoryService {
       });
 
       // Agregar categorías custom standalone (sin template, sin parent)
+      // Incluye tanto isCustom:true como isCustom:false (categorías override sin template)
       const customCategories = overrides
-        .filter(o => o.templateId === null && o.isCustom && !o.parentOverrideId && o.isActive)
+        .filter(o => o.templateId === null && !o.parentOverrideId && o.isActive)
         .map(custom => this.mergeCustomCategory(custom, overrides));
 
       return [...mergedTemplates, ...customCategories];
@@ -577,9 +578,9 @@ export class UserCategoryService {
       this.mergeTemplate(sub, overridesByTemplateId, userId, allOverrides)
     ) || [];
 
-    // Si este es un template padre (no una subcategoría de template), agregar custom subcategorías creadas bajo él
+    // Si existe un override para este template, agregar custom subcategorías creadas bajo él
     const customSubcategories: MergedCategory[] = [];
-    if (override && !template.parentTemplateId) {
+    if (override) {
       // Buscar custom subcategorías que fueron creadas bajo este override
       const customSubs = allOverrides.filter(
         o => o.parentOverrideId === override.id && o.isActive && o.isCustom

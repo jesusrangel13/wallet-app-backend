@@ -1169,3 +1169,166 @@ export const getTagTrend = async (
 
   return result;
 };
+
+/**
+ * Get annual summary with aggregated data
+ */
+export const getAnnualSummary = async (userId: string, year: number) => {
+  // 1. Get Monthly Summaries for the year
+  const monthlySummaries = await prisma.monthlySummary.findMany({
+    where: {
+      userId,
+      year,
+    },
+    orderBy: {
+      month: 'asc',
+    },
+  });
+
+  // Initialize aggregates
+  let totalIncome = 0;
+  let totalExpense = 0;
+  let totalPersonalExpense = 0;
+  let totalSharedExpense = 0;
+  let totalSavings = 0;
+
+  // Fill in missing months with zero
+  const monthlyTrend: any[] = [];
+  for (let m = 1; m <= 12; m++) {
+    const summary = monthlySummaries.find((s) => s.month === m);
+    if (summary) {
+      totalIncome += Number(summary.income);
+      totalExpense += Number(summary.expense);
+      totalPersonalExpense += Number(summary.personalExpense);
+      totalSharedExpense += Number(summary.sharedExpense);
+      totalSavings += Number(summary.savings);
+
+      monthlyTrend.push({
+        month: m,
+        income: Number(summary.income),
+        expense: Number(summary.expense),
+        savings: Number(summary.savings),
+      });
+    } else {
+      monthlyTrend.push({
+        month: m,
+        income: 0,
+        expense: 0,
+        savings: 0,
+      });
+    }
+  }
+
+  // 2. Get Annual Top Tags (Real-time aggregation)
+  const firstDayOfYear = new Date(year, 0, 1);
+  const lastDayOfYear = new Date(year, 11, 31);
+
+  // Alternative efficient approach for tags:
+  const tagsWithAmounts = await prisma.transactionTag.findMany({
+    where: {
+      transaction: {
+        userId,
+        type: 'EXPENSE',
+        date: {
+          gte: firstDayOfYear,
+          lte: lastDayOfYear,
+        },
+      },
+    },
+    select: {
+      tagId: true,
+      tag: { select: { name: true, color: true } },
+      transaction: { select: { amount: true } },
+    },
+  });
+
+  const tagAggregates: Record<string, { name: string; color: string | null; amount: number; count: number }> = {};
+
+  tagsWithAmounts.forEach(tt => {
+    if (!tagAggregates[tt.tagId]) {
+      tagAggregates[tt.tagId] = {
+        name: tt.tag.name,
+        color: tt.tag.color,
+        amount: 0,
+        count: 0
+      };
+    }
+    tagAggregates[tt.tagId].amount += Number(tt.transaction.amount);
+    tagAggregates[tt.tagId].count += 1;
+  });
+
+  const topTagsResult = Object.values(tagAggregates)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 10);
+
+  // 3. Get Annual Top Categories
+  const annualExpenses = await prisma.transaction.findMany({
+    where: {
+      userId,
+      type: 'EXPENSE',
+      date: {
+        gte: firstDayOfYear,
+        lte: lastDayOfYear,
+      },
+    },
+    select: {
+      categoryId: true,
+      amount: true,
+    },
+  });
+
+  const categoryIds = annualExpenses.map(e => e.categoryId);
+  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
+
+  const categoryAggregates: Record<string, { name: string; icon: string | null; color: string | null; amount: number }> = {};
+  let uncategorizedAmount = 0;
+
+  annualExpenses.forEach(exp => {
+    const amount = Number(exp.amount);
+    if (!exp.categoryId) {
+      uncategorizedAmount += amount;
+      return;
+    }
+    const catInfo = categoryMap.get(exp.categoryId);
+    // Group by Parent Category for cleaner high-level view
+    const parent = catInfo?.parent || catInfo;
+
+    if (parent) {
+      if (!categoryAggregates[parent.name]) {
+        categoryAggregates[parent.name] = {
+          name: parent.name,
+          icon: parent.icon,
+          color: parent.color,
+          amount: 0
+        };
+      }
+      categoryAggregates[parent.name].amount += amount;
+    } else {
+      uncategorizedAmount += amount;
+    }
+  });
+
+  if (uncategorizedAmount > 0) {
+    categoryAggregates['Uncategorized'] = { name: 'Uncategorized', icon: null, color: null, amount: uncategorizedAmount };
+  }
+
+  const topCategoriesResult = Object.values(categoryAggregates)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 10);
+
+
+  return {
+    year,
+    totals: {
+      income: totalIncome,
+      expense: totalExpense,
+      personalExpense: totalPersonalExpense,
+      sharedExpense: totalSharedExpense,
+      savings: totalSavings,
+      savingsRate: totalIncome > 0 ? (totalSavings / totalIncome) * 100 : 0
+    },
+    monthlyTrend,
+    topTags: topTagsResult,
+    topCategories: topCategoriesResult
+  };
+};

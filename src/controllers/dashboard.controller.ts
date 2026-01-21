@@ -299,3 +299,23 @@ export const getTagTrend = async (
     next(error);
   }
 };
+
+export const getAnnualSummary = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user!.userId;
+    const year = req.query.year ? parseInt(req.query.year as string) : new Date().getFullYear();
+
+    const data = await dashboardService.getAnnualSummary(userId, year);
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

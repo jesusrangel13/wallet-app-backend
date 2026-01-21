@@ -10,6 +10,9 @@ router.use(authenticate);
 // Unified summary endpoint (returns all widget data in one request)
 router.get('/summary', dashboardController.getDashboardSummary);
 
+// Annual summary endpoint
+router.get('/annual', dashboardController.getAnnualSummary);
+
 // Individual endpoints
 router.get('/cashflow', dashboardController.getCashFlow);
 router.get('/expenses-by-category', dashboardController.getExpensesByCategory);

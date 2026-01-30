@@ -12,11 +12,13 @@ router.get('/summary', dashboardController.getDashboardSummary);
 
 // Annual summary endpoint
 router.get('/annual', dashboardController.getAnnualSummary);
+router.get('/annual/compare', dashboardController.getMultiYearComparison);
 
 // Individual endpoints
 router.get('/cashflow', dashboardController.getCashFlow);
 router.get('/expenses-by-category', dashboardController.getExpensesByCategory);
 router.get('/expenses-by-parent-category', dashboardController.getExpensesByParentCategory);
+router.get('/category-breakdown', dashboardController.getCategoryBreakdown);
 router.get('/balance-history', dashboardController.getBalanceHistory);
 router.get('/group-balances', dashboardController.getGroupBalances);
 router.get('/account-balances', dashboardController.getAccountBalances);

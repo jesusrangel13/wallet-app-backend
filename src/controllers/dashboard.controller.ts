@@ -319,3 +319,57 @@ export const getAnnualSummary = async (
     next(error);
   }
 };
+
+export const getMultiYearComparison = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user!.userId;
+    const yearsParam = req.query.years;
+    let years: number[] = [];
+
+    if (Array.isArray(yearsParam)) {
+      years = yearsParam.map((y) => parseInt(y as string));
+    } else if (yearsParam) {
+      years = [parseInt(yearsParam as string)];
+    } else {
+      const current = new Date().getFullYear();
+      years = [current, current - 1];
+    }
+
+    years = years.filter((y) => !isNaN(y));
+
+    const data = await dashboardService.getMultiYearComparison(userId, years);
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getCategoryBreakdown = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user!.userId;
+    const now = new Date();
+    const month = req.query.month ? parseInt(req.query.month as string) : now.getMonth();
+    const year = req.query.year ? parseInt(req.query.year as string) : now.getFullYear();
+
+    const data = await dashboardService.getCategoryBreakdown(userId, month, year);
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

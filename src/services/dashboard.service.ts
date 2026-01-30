@@ -1259,7 +1259,7 @@ export const getAnnualSummary = async (userId: string, year: number) => {
 
   const topTagsResult = Object.values(tagAggregates)
     .sort((a, b) => b.amount - a.amount)
-    .slice(0, 10);
+    .slice(0, 100);
 
   // 3. Get Annual Top Categories
   const annualExpenses = await prisma.transaction.findMany({
@@ -1281,6 +1281,7 @@ export const getAnnualSummary = async (userId: string, year: number) => {
   const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
 
   const categoryAggregates: Record<string, { name: string; icon: string | null; color: string | null; amount: number }> = {};
+  const subcategoryAggregates: Record<string, { name: string; parentName: string; amount: number }> = {};
   let uncategorizedAmount = 0;
 
   annualExpenses.forEach(exp => {
@@ -1306,6 +1307,19 @@ export const getAnnualSummary = async (userId: string, year: number) => {
     } else {
       uncategorizedAmount += amount;
     }
+
+    // Group by Subcategory (only if it has a parent)
+    if (catInfo?.parent) {
+      const subKey = `${parent?.name}::${catInfo.name}`;
+      if (!subcategoryAggregates[subKey]) {
+        subcategoryAggregates[subKey] = {
+          name: catInfo.name,
+          parentName: parent?.name || 'Unknown',
+          amount: 0
+        };
+      }
+      subcategoryAggregates[subKey].amount += amount;
+    }
   });
 
   if (uncategorizedAmount > 0) {
@@ -1315,6 +1329,10 @@ export const getAnnualSummary = async (userId: string, year: number) => {
   const topCategoriesResult = Object.values(categoryAggregates)
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 10);
+
+  const topSubcategoriesResult = Object.values(subcategoryAggregates)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 500);
 
 
   return {
@@ -1329,6 +1347,137 @@ export const getAnnualSummary = async (userId: string, year: number) => {
     },
     monthlyTrend,
     topTags: topTagsResult,
-    topCategories: topCategoriesResult
+    topCategories: topCategoriesResult,
+    topSubcategories: topSubcategoriesResult
+  };
+};
+
+/**
+ * Get multi-year comparison data
+ */
+export const getMultiYearComparison = async (userId: string, years: number[]) => {
+  const summaries = await prisma.monthlySummary.groupBy({
+    by: ['year'],
+    where: {
+      userId,
+      year: { in: years }
+    },
+    _sum: {
+      income: true,
+      expense: true,
+      savings: true,
+    }
+  });
+
+  return years.map(year => {
+    const data = summaries.find(s => s.year === year);
+    const income = Number(data?._sum.income || 0);
+    const expense = Number(data?._sum.expense || 0);
+    const savings = Number(data?._sum.savings || 0);
+
+    return {
+      year,
+      income,
+      expense,
+      savings,
+      savingsRate: income > 0 ? (savings / income) * 100 : 0
+    };
+  });
+};
+
+export const getCategoryBreakdown = async (
+  userId: string,
+  month?: number,
+  year?: number
+) => {
+  const now = new Date();
+  const targetMonth = month !== undefined ? month : now.getMonth();
+  const targetYear = year !== undefined ? year : now.getFullYear();
+  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
+  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
+
+  const expenses = await prisma.transaction.findMany({
+    where: {
+      userId,
+      type: 'EXPENSE',
+      date: {
+        gte: firstDayOfMonth,
+        lte: lastDayOfMonth,
+      },
+    },
+    select: {
+      categoryId: true,
+      amount: true,
+    },
+  });
+
+  // Resolve all categories in batch
+  const categoryIds = expenses.map((e) => e.categoryId);
+  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
+
+  // Group by parent category and track subcategories
+  const parentData: Record<
+    string,
+    { amount: number; icon: string | null; color: string | null }
+  > = {};
+
+  const subcategoryAgg: Record<string, number> = {}; // Key: "ParentName:SubName" -> amount
+
+  let totalExpenses = 0;
+
+  expenses.forEach((expense) => {
+    const categoryInfo = expense.categoryId ? categoryMap.get(expense.categoryId) : null;
+    const parentCategory = categoryInfo?.parent || categoryInfo;
+    const parentName = parentCategory?.name || 'Uncategorized';
+    const parentIcon = parentCategory?.icon || null;
+    const parentColor = parentCategory?.color || null;
+    const amount = Number(expense.amount);
+
+    totalExpenses += amount;
+
+    // Update Parent Total
+    if (!parentData[parentName]) {
+      parentData[parentName] = {
+        amount: 0,
+        icon: parentIcon,
+        color: parentColor,
+      };
+    }
+    parentData[parentName].amount += amount;
+
+    // Update Subcategory Total if it IS a subcategory
+    if (categoryInfo && categoryInfo.parent) {
+      const subName = categoryInfo.name;
+      const key = `${parentName}:${subName}`;
+      if (subcategoryAgg[key] === undefined) subcategoryAgg[key] = 0;
+      subcategoryAgg[key] += amount;
+    }
+  });
+
+  // Format Parents
+  const categories = Object.entries(parentData)
+    .map(([name, data]) => ({
+      name,
+      amount: data.amount, // Total amount including subs
+      percentage: totalExpenses > 0 ? (data.amount / totalExpenses) * 100 : 0,
+      icon: data.icon,
+      color: data.color,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  // Format Subcategories
+  const subcategories = Object.entries(subcategoryAgg).map(([key, amount]) => {
+    const [parentName, name] = key.split(':');
+    return {
+      name,
+      parentName,
+      amount
+    };
+  });
+
+  return {
+    categories,
+    subcategories,
+    totalExpense: totalExpenses
   };
 };

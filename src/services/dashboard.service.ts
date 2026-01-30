@@ -1384,6 +1384,38 @@ export const getAnnualSummary = async (userId: string, year: number) => {
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 500);
 
+  // D. Net Worth Evolution
+  let cumulativeSavings = 0;
+  const netWorthData = monthlyTrend.map(m => {
+    cumulativeSavings += m.savings;
+    return {
+      month: m.month,
+      amount: cumulativeSavings
+    };
+  });
+
+  // E. Fixed vs Variable Expenses (Heuristic)
+  const fixedKeywords = ['vivienda', 'hipoteca', 'alquiler', 'seguro', 'prestamo', 'crédito', 'educación', 'suscripción', 'internet', 'luz', 'agua', 'gas', 'celular', 'gastos comunes'];
+
+  let fixedExpenseTotal = 0;
+  let variableExpenseTotal = 0;
+
+  Object.values(categoryAggregates).forEach(cat => {
+    const lowerName = cat.name.toLowerCase();
+    const isFixed = fixedKeywords.some(keyword => lowerName.includes(keyword));
+
+    if (isFixed) {
+      fixedExpenseTotal += cat.amount;
+    } else {
+      variableExpenseTotal += cat.amount;
+    }
+  });
+
+  const expenseComposition = {
+    fixed: fixedExpenseTotal,
+    variable: variableExpenseTotal
+  };
+
   return {
     year,
     totals: {
@@ -1395,6 +1427,8 @@ export const getAnnualSummary = async (userId: string, year: number) => {
       savingsRate: totalIncome > 0 ? (totalSavings / totalIncome) * 100 : 0
     },
     monthlyTrend,
+    netWorthData,
+    expenseComposition,
     topTags: topTagsResult,
     topCategories: topCategoriesResult,
     topSubcategories: topSubcategoriesResult

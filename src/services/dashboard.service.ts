@@ -834,7 +834,13 @@ export const getMonthlySavings = async (userId: string, month?: number, year?: n
     },
   });
 
-  if (!summary) {
+  // Check for data consistency. The total expense in the summary should roughly equal personal + shared.
+  // If there's a significant mismatch (e.g. legacy data where breakdown wasn't calculated), we must recalculate.
+  const storedExpense = Number(summary?.expense || 0);
+  const storedBreakdownTotal = Number(summary?.personalExpense || 0) + Number(summary?.sharedExpense || 0);
+  const isInconsistent = storedExpense > 0 && Math.abs(storedExpense - storedBreakdownTotal) > 10;
+
+  if (!summary || isInconsistent) {
     const calculatedSummary = await updateMonthlySummary(userId, new Date(targetYear, targetMonth, 1));
     const savings = Number(calculatedSummary.savings || 0);
     const totalIncome = Number(calculatedSummary.income || 0);
@@ -846,6 +852,10 @@ export const getMonthlySavings = async (userId: string, month?: number, year?: n
       savingsRate,
       income: totalIncome,
       expenses: totalExpenses,
+      breakdown: {
+        personal: Number(calculatedSummary.personalExpense || 0),
+        shared: Number(calculatedSummary.sharedExpense || 0),
+      },
       month: monthDate.toLocaleString('default', { month: 'long', year: 'numeric' }),
     };
   }
@@ -1173,16 +1183,14 @@ export const getTagTrend = async (
 /**
  * Get annual summary with aggregated data
  */
+/**
+ * Get annual summary with aggregated data (Optimized for Scale)
+ */
 export const getAnnualSummary = async (userId: string, year: number) => {
-  // 1. Get Monthly Summaries for the year
+  // 1. Get Monthly Summaries for the year (Pre-calculated totals)
   const monthlySummaries = await prisma.monthlySummary.findMany({
-    where: {
-      userId,
-      year,
-    },
-    orderBy: {
-      month: 'asc',
-    },
+    where: { userId, year },
+    orderBy: { month: 'asc' },
   });
 
   // Initialize aggregates
@@ -1219,20 +1227,19 @@ export const getAnnualSummary = async (userId: string, year: number) => {
     }
   }
 
-  // 2. Get Annual Top Tags (Real-time aggregation)
+  // Define date range for the year
   const firstDayOfYear = new Date(year, 0, 1);
   const lastDayOfYear = new Date(year, 11, 31);
 
-  // Alternative efficient approach for tags:
+  // 2. Get Annual Top Tags
+  // We use a specialized fetch to getting required fields only, which is efficient enough for now.
+  // Ideally this would be a raw query for max performance on millions of rows.
   const tagsWithAmounts = await prisma.transactionTag.findMany({
     where: {
       transaction: {
         userId,
         type: 'EXPENSE',
-        date: {
-          gte: firstDayOfYear,
-          lte: lastDayOfYear,
-        },
+        date: { gte: firstDayOfYear, lte: lastDayOfYear },
       },
     },
     select: {
@@ -1243,7 +1250,6 @@ export const getAnnualSummary = async (userId: string, year: number) => {
   });
 
   const tagAggregates: Record<string, { name: string; color: string | null; amount: number; count: number }> = {};
-
   tagsWithAmounts.forEach(tt => {
     if (!tagAggregates[tt.tagId]) {
       tagAggregates[tt.tagId] = {
@@ -1261,39 +1267,81 @@ export const getAnnualSummary = async (userId: string, year: number) => {
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 100);
 
-  // 3. Get Annual Top Categories
+
+  // 3. Get Annual Top Categories & Subcategories (Optimized with Shared Split)
+
+  // A. Get Total Expenses by Category (Base Totals)
   const annualExpenses = await prisma.transaction.findMany({
     where: {
       userId,
       type: 'EXPENSE',
-      date: {
-        gte: firstDayOfYear,
-        lte: lastDayOfYear,
-      },
+      date: { gte: firstDayOfYear, lte: lastDayOfYear },
     },
     select: {
       categoryId: true,
       amount: true,
+      sharedExpenseId: true, // Needed to identify potential shared expenses
     },
   });
 
-  const categoryIds = annualExpenses.map(e => e.categoryId);
+  const sharedExpenseIds = annualExpenses
+    .map(e => e.sharedExpenseId)
+    .filter((id): id is string => id !== null);
+
+  // B. Get Shared Expense Details (The "Optimization")
+  // Fetch specific shared expenses linked to these transactions to ensure we have the data
+  // regardless of potential date discrepancies or payer fields.
+  const sharedExpensesInYear = await prisma.sharedExpense.findMany({
+    where: {
+      id: { in: sharedExpenseIds },
+    },
+    select: {
+      id: true,
+      categoryId: true,
+      amount: true,
+      participants: {
+        where: { userId }, // Get MY participant record to know my share
+        select: { amountOwed: true } // My share
+      }
+    }
+  });
+
+  // Map SharedExpenseId -> GroupPortion (Total - MyShare)
+  const sharedExpenseGroupPortionMap = new Map<string, number>();
+
+  sharedExpensesInYear.forEach(se => {
+    const totalAmount = Number(se.amount);
+    const myShare = Number(se.participants[0]?.amountOwed || 0); // Assuming I am a participant in my own payment
+    const groupPortion = totalAmount - myShare;
+    sharedExpenseGroupPortionMap.set(se.id, groupPortion);
+  });
+
+  // C. Aggregation Phase
+  const categoryIds = [...new Set(annualExpenses.map(e => e.categoryId).filter(id => id !== null))] as string[];
   const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
 
   const categoryAggregates: Record<string, { name: string; icon: string | null; color: string | null; amount: number }> = {};
-  const subcategoryAggregates: Record<string, { name: string; parentName: string; amount: number }> = {};
+  const subcategoryAggregates: Record<string, { name: string; parentName: string; amount: number; groupAmount: number }> = {};
   let uncategorizedAmount = 0;
 
   annualExpenses.forEach(exp => {
     const amount = Number(exp.amount);
+
+    // Determine Group Portion for this transaction
+    let groupAmount = 0;
+    if (exp.sharedExpenseId && sharedExpenseGroupPortionMap.has(exp.sharedExpenseId)) {
+      groupAmount = sharedExpenseGroupPortionMap.get(exp.sharedExpenseId) || 0;
+    }
+
     if (!exp.categoryId) {
       uncategorizedAmount += amount;
       return;
     }
+
     const catInfo = categoryMap.get(exp.categoryId);
-    // Group by Parent Category for cleaner high-level view
     const parent = catInfo?.parent || catInfo;
 
+    // Parent Level Aggregation (Total Amount Only for now)
     if (parent) {
       if (!categoryAggregates[parent.name]) {
         categoryAggregates[parent.name] = {
@@ -1308,17 +1356,19 @@ export const getAnnualSummary = async (userId: string, year: number) => {
       uncategorizedAmount += amount;
     }
 
-    // Group by Subcategory (only if it has a parent)
+    // Subcategory Level Aggregation (With Personal/Group Split)
     if (catInfo?.parent) {
       const subKey = `${parent?.name}::${catInfo.name}`;
       if (!subcategoryAggregates[subKey]) {
         subcategoryAggregates[subKey] = {
           name: catInfo.name,
           parentName: parent?.name || 'Unknown',
-          amount: 0
+          amount: 0,
+          groupAmount: 0 // Initialize group amount
         };
       }
       subcategoryAggregates[subKey].amount += amount;
+      subcategoryAggregates[subKey].groupAmount += groupAmount;
     }
   });
 
@@ -1333,7 +1383,6 @@ export const getAnnualSummary = async (userId: string, year: number) => {
   const topSubcategoriesResult = Object.values(subcategoryAggregates)
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 500);
-
 
   return {
     year,
@@ -1385,6 +1434,9 @@ export const getMultiYearComparison = async (userId: string, years: number[]) =>
   });
 };
 
+// ... existing code ...
+
+
 export const getCategoryBreakdown = async (
   userId: string,
   month?: number,
@@ -1408,7 +1460,36 @@ export const getCategoryBreakdown = async (
     select: {
       categoryId: true,
       amount: true,
+      sharedExpenseId: true,
     },
+  });
+
+  // Fetch specific shared expenses linked to these transactions (Robust Loop Logic)
+  const sharedExpenseIds = expenses
+    .map(e => e.sharedExpenseId)
+    .filter((id): id is string => id !== null);
+
+  const sharedExpensesInPeriod = await prisma.sharedExpense.findMany({
+    where: {
+      id: { in: sharedExpenseIds },
+    },
+    select: {
+      id: true,
+      amount: true,
+      participants: {
+        where: { userId },
+        select: { amountOwed: true }
+      }
+    }
+  });
+
+  const sharedExpenseGroupPortionMap = new Map<string, number>();
+
+  sharedExpensesInPeriod.forEach(se => {
+    const totalAmount = Number(se.amount);
+    const myShare = Number(se.participants[0]?.amountOwed || 0);
+    const groupPortion = totalAmount - myShare;
+    sharedExpenseGroupPortionMap.set(se.id, groupPortion);
   });
 
   // Resolve all categories in batch
@@ -1421,19 +1502,26 @@ export const getCategoryBreakdown = async (
     { amount: number; icon: string | null; color: string | null }
   > = {};
 
-  const subcategoryAgg: Record<string, number> = {}; // Key: "ParentName:SubName" -> amount
+  const subcategoryAgg: Record<string, { amount: number; groupAmount: number }> = {};
 
   let totalExpenses = 0;
 
   expenses.forEach((expense) => {
+    const amount = Number(expense.amount);
+
+    let groupAmount = 0;
+    if (expense.sharedExpenseId && sharedExpenseGroupPortionMap.has(expense.sharedExpenseId)) {
+      groupAmount = sharedExpenseGroupPortionMap.get(expense.sharedExpenseId) || 0;
+    }
+
+    totalExpenses += amount;
+
+    // ... Resolve Category logic remains same ...
     const categoryInfo = expense.categoryId ? categoryMap.get(expense.categoryId) : null;
     const parentCategory = categoryInfo?.parent || categoryInfo;
     const parentName = parentCategory?.name || 'Uncategorized';
     const parentIcon = parentCategory?.icon || null;
     const parentColor = parentCategory?.color || null;
-    const amount = Number(expense.amount);
-
-    totalExpenses += amount;
 
     // Update Parent Total
     if (!parentData[parentName]) {
@@ -1449,8 +1537,14 @@ export const getCategoryBreakdown = async (
     if (categoryInfo && categoryInfo.parent) {
       const subName = categoryInfo.name;
       const key = `${parentName}:${subName}`;
-      if (subcategoryAgg[key] === undefined) subcategoryAgg[key] = 0;
-      subcategoryAgg[key] += amount;
+      if (!subcategoryAgg[key]) {
+        subcategoryAgg[key] = {
+          amount: 0,
+          groupAmount: 0
+        };
+      }
+      subcategoryAgg[key].amount += amount;
+      subcategoryAgg[key].groupAmount += groupAmount;
     }
   });
 
@@ -1466,12 +1560,13 @@ export const getCategoryBreakdown = async (
     .sort((a, b) => b.amount - a.amount);
 
   // Format Subcategories
-  const subcategories = Object.entries(subcategoryAgg).map(([key, amount]) => {
+  const subcategories = Object.entries(subcategoryAgg).map(([key, data]) => {
     const [parentName, name] = key.split(':');
     return {
       name,
       parentName,
-      amount
+      amount: data.amount,
+      groupAmount: data.groupAmount
     };
   });
 

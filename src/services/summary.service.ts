@@ -12,7 +12,7 @@ export const updateMonthlySummary = async (userId: string, date: Date | string) 
 
     // Create start and end dates for the month
     const firstDayOfMonth = new Date(year, month, 1);
-    const lastDayOfMonth = new Date(year, month + 1, 0);
+    const lastDayOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
     // 1. Calculate Income
     // Exclude 'Cobro de préstamo' and 'Cobro de deuda' categories as they are not true income

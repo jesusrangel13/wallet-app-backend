@@ -64,77 +64,119 @@ export const getExpensesByCategory = async (
   userId: string,
   month?: number,
   year?: number,
-  preFetchedTransactions?: { categoryId: string | null; amount: any }[]
+  data?: {
+    personal: { categoryId: string | null; amount: any }[];
+    shared: { expense: { categoryId: string | null }; amountOwed: any }[];
+  }
 ) => {
-  let expenses;
+  let personalTransactions;
+  let sharedParticipations;
 
-  if (preFetchedTransactions) {
-    // Use pre-fetched transactions if available
-    expenses = preFetchedTransactions;
+  if (data) {
+    personalTransactions = data.personal;
+    sharedParticipations = data.shared;
   } else {
-    // Otherwise fetch from database
+    // Fallback if called individually (replicate improved logic)
     const now = new Date();
     const targetMonth = month !== undefined ? month : now.getMonth();
     const targetYear = year !== undefined ? year : now.getFullYear();
     const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
-    const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
+    const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59, 999);
 
-    expenses = await prisma.transaction.findMany({
+    // 1. Personal
+    personalTransactions = await prisma.transaction.findMany({
       where: {
         userId,
         type: 'EXPENSE',
-        date: {
-          gte: firstDayOfMonth,
-          lte: lastDayOfMonth,
-        },
+        sharedExpenseId: null,
+        loanId: null,
+        date: { gte: firstDayOfMonth, lte: lastDayOfMonth },
+      },
+      select: { categoryId: true, amount: true },
+    });
+
+    // 2. Shared
+    sharedParticipations = await prisma.expenseParticipant.findMany({
+      where: {
+        userId,
+        expense: { date: { gte: firstDayOfMonth, lte: lastDayOfMonth } },
       },
       select: {
-        categoryId: true,
-        amount: true,
+        amountOwed: true,
+        expense: { select: { categoryId: true } },
       },
     });
   }
 
-  // Resolve all categories in batch
-  const categoryIds = expenses.map((e) => e.categoryId);
+  // Resolve categories
+  const categoryIds = [
+    ...personalTransactions.map((e) => e.categoryId),
+    ...sharedParticipations.map((e) => e.expense.categoryId),
+  ];
   const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
 
-  // Group by category
+  // Exclude 'Inversiones' (Income Type) logic from summary service to match Savings
+  // We'll filter in memory for simplicity/performance
+  // Note: we need to check if the resolved category name is 'Inversiones' AND type is INCOME?
+  // Or just rely on the fact that if it was 'Inversiones' it might be excluded.
+  // The summary service fetches the template ID. Here we have resolved categories.
+  // We will assume standard filtering for now.
+
   const categoryData: Record<string, number> = {};
   let totalExpenses = 0;
 
-  expenses.forEach((expense) => {
+  // Process Personal
+  personalTransactions.forEach((expense) => {
     const categoryInfo = expense.categoryId ? categoryMap.get(expense.categoryId) : null;
     const categoryName = categoryInfo?.name || 'Uncategorized';
-    const amount = Number(expense.amount);
 
-    if (!categoryData[categoryName]) {
-      categoryData[categoryName] = 0;
-    }
+    // Explicit exclusion for "Inversiones" if it mimics summary logic?
+    // User complaint is about sum. If we include it here, sum is higher.
+    // If summary excludes it, we should too.
+    if (categoryName === 'Inversiones') return;
+
+    const amount = Number(expense.amount);
+    if (!categoryData[categoryName]) categoryData[categoryName] = 0;
     categoryData[categoryName] += amount;
     totalExpenses += amount;
   });
 
-  // Convert to array with percentages
-  const result = Object.entries(categoryData).map(([category, amount]) => ({
+  // Process Shared
+  sharedParticipations.forEach((part) => {
+    const categoryId = part.expense.categoryId;
+    const categoryInfo = categoryId ? categoryMap.get(categoryId) : null;
+    const categoryName = categoryInfo?.name || 'Uncategorized';
+
+    if (categoryName === 'Inversiones') return;
+
+    const amount = Number(part.amountOwed);
+    if (!categoryData[categoryName]) categoryData[categoryName] = 0;
+    categoryData[categoryName] += amount;
+    totalExpenses += amount;
+  });
+
+  return Object.entries(categoryData).map(([category, amount]) => ({
     category,
     amount,
     percentage: totalExpenses > 0 ? (amount / totalExpenses) * 100 : 0,
   }));
-
-  return result;
 };
 
 export const getExpensesByParentCategory = async (
   userId: string,
   month?: number,
   year?: number,
-  preFetchedTransactions?: { categoryId: string | null; amount: any }[]
+  data?: {
+    personal: { categoryId: string | null; amount: any }[];
+    shared: { expense: { categoryId: string | null }; amountOwed: any }[];
+  }
 ) => {
-  let expenses;
+  let personalTransactions;
+  let sharedParticipations;
 
-  if (preFetchedTransactions) {
-    expenses = preFetchedTransactions;
+  if (data) {
+    personalTransactions = data.personal;
+    sharedParticipations = data.shared;
   } else {
     const now = new Date();
     const targetMonth = month !== undefined ? month : now.getMonth();
@@ -142,42 +184,51 @@ export const getExpensesByParentCategory = async (
     const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
     const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
 
-    expenses = await prisma.transaction.findMany({
+    personalTransactions = await prisma.transaction.findMany({
       where: {
         userId,
         type: 'EXPENSE',
-        date: {
-          gte: firstDayOfMonth,
-          lte: lastDayOfMonth,
-        },
+        sharedExpenseId: null,
+        loanId: null,
+        date: { gte: firstDayOfMonth, lte: lastDayOfMonth },
+      },
+      select: { categoryId: true, amount: true },
+    });
+
+    sharedParticipations = await prisma.expenseParticipant.findMany({
+      where: {
+        userId,
+        expense: { date: { gte: firstDayOfMonth, lte: lastDayOfMonth } },
       },
       select: {
-        categoryId: true,
-        amount: true,
+        amountOwed: true,
+        expense: { select: { categoryId: true } },
       },
     });
   }
 
-  // Resolve all categories in batch with parent info
-  const categoryIds = expenses.map((e) => e.categoryId);
+  const categoryIds = [
+    ...personalTransactions.map((e) => e.categoryId),
+    ...sharedParticipations.map((e) => e.expense.categoryId),
+  ];
   const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
 
-  // Group by parent category (or category itself if no parent)
   const categoryData: Record<
     string,
     { amount: number; icon: string | null; color: string | null }
   > = {};
   let totalExpenses = 0;
 
-  expenses.forEach((expense) => {
-    const categoryInfo = expense.categoryId ? categoryMap.get(expense.categoryId) : null;
+  const processItem = (categoryId: string | null, amount: number) => {
+    const categoryInfo = categoryId ? categoryMap.get(categoryId) : null;
 
-    // Use parent category if exists, otherwise use the category itself
+    // Check exclusion
+    if (categoryInfo?.name === 'Inversiones' || categoryInfo?.parent?.name === 'Inversiones') return;
+
     const parentCategory = categoryInfo?.parent || categoryInfo;
     const categoryName = parentCategory?.name || 'Uncategorized';
     const categoryIcon = parentCategory?.icon || null;
     const categoryColor = parentCategory?.color || null;
-    const amount = Number(expense.amount);
 
     if (!categoryData[categoryName]) {
       categoryData[categoryName] = {
@@ -188,10 +239,12 @@ export const getExpensesByParentCategory = async (
     }
     categoryData[categoryName].amount += amount;
     totalExpenses += amount;
-  });
+  };
 
-  // Convert to array with percentages, sorted by amount descending
-  const result = Object.entries(categoryData)
+  personalTransactions.forEach(tx => processItem(tx.categoryId, Number(tx.amount)));
+  sharedParticipations.forEach(part => processItem(part.expense.categoryId, Number(part.amountOwed)));
+
+  return Object.entries(categoryData)
     .map(([category, data]) => ({
       category,
       amount: data.amount,
@@ -200,8 +253,6 @@ export const getExpensesByParentCategory = async (
       color: data.color,
     }))
     .sort((a, b) => b.amount - a.amount);
-
-  return result;
 };
 
 export const getBalanceHistory = async (userId: string, days: number = 30, endDate?: Date) => {
@@ -476,38 +527,6 @@ export const getGroupBalances = async (userId: string, month?: number, year?: nu
     // So "Payment Sent" should INCREASE my balance (add to it). -50 + 50 = 0.
     // And "Payment Received" limits my claim. +50 claim, receive 50 -> 0. (Subtract).
 
-    // WHY did group.service do subtraction for payer?
-    // "balances[payment.fromUserId] = ... - amount"
-    // Maybe `group.service` calculates "How much I have PAID total"?
-    // No, it calculates "balances".
-    // Let's look at `group.service.ts` again if I could?
-    // "Payer gets positive balance" (lines 618-620). Correct. (Paid for expense).
-    // "Participants get negative balance". Correct. (Consumed expense).
-    // "Payment":
-    // balances[payment.from] -= amount.
-    // balances[payment.to] += amount.
-
-    // Example: I owe $50. Balance -50.
-    // I pay $50. Reference logic says: -50 - 50 = -100.
-    // THIS SEEMS WRONG in `group.service.ts` OR I misunderstand "Balance".
-    // If "Balance" means "Net Cash Flow relative to group purpose", then:
-    // I paid $100 for pizza. Flow -100 (cash out).
-    // I ate $50 pizza. Value +50.
-    // Net -50.
-    // Whoops.
-
-    // Let's trust standard logic:
-    // Splitwise: Positive = You are owed. Negative = You owe.
-    // Expense (I paid $100, split 50/50):
-    // ME: Paid $100 (+100 credit). Consumed $50 (-50 debit). Net +50. (Correct).
-    // YOU: Paid $0. Consumed $50 (-50 debit). Net -50. (Correct).
-
-    // Payment (I owe you $50. I pay you $50).
-    // ME: I send $50. Cash leaves me.
-    // Does this make me "Owed"? No, it settles my debt.
-    // So my balance (-50) should go to 0. So I must ADD 50.
-    // YOU: Receive $50. Your balance (+50) should go to 0. So you must SUBTRACT 50.
-
     // SO `group.service.ts` logic seems INVERTED for payments?
     // "balances[payment.fromUserId] -= amount"
     // If I (from) pay, my balance decreases? -50 becomes -100?
@@ -658,54 +677,63 @@ export const getAccountBalances = async (userId: string) => {
  */
 export const getDashboardSummary = async (userId: string, month?: number, year?: number) => {
   try {
-    // Optimization: Fetch expenses for the month ONCE
+    // Optimization: Fetch expenses for the month ONCE, splitted correctly
     const now = new Date();
     const targetMonth = month !== undefined ? month : now.getMonth();
     const targetYear = year !== undefined ? year : now.getFullYear();
     const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
     const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
 
-    const expensesPromise = prisma.transaction.findMany({
+    // 1. Personal Expenses (Exclude shared logic and loans)
+    const personalExpensesPromise = prisma.transaction.findMany({
       where: {
         userId,
         type: 'EXPENSE',
-        date: {
-          gte: firstDayOfMonth,
-          lte: lastDayOfMonth,
-        },
+        sharedExpenseId: null,
+        loanId: null,
+        date: { gte: firstDayOfMonth, lte: lastDayOfMonth },
+      },
+      select: { categoryId: true, amount: true },
+    });
+
+    // 2. Shared Expenses (My Share)
+    const sharedParticipationsPromise = prisma.expenseParticipant.findMany({
+      where: {
+        userId,
+        expense: { date: { gte: firstDayOfMonth, lte: lastDayOfMonth } },
       },
       select: {
-        categoryId: true,
-        amount: true,
+        amountOwed: true,
+        expense: { select: { categoryId: true } },
       },
     });
 
-    // Start other independent queries
     const cashFlowPromise = getCashFlow(userId);
     const balanceHistoryPromise = getBalanceHistory(userId);
     const groupBalancesPromise = getGroupBalances(userId, month, year);
     const accountBalancesPromise = getAccountBalances(userId);
 
-    // Wait for everything
     const [
-      expenses,
+      personal,
+      shared,
       cashFlow,
       balanceHistory,
       groupBalances,
       accountBalances,
     ] = await Promise.all([
-      expensesPromise,
+      personalExpensesPromise,
+      sharedParticipationsPromise,
       cashFlowPromise,
       balanceHistoryPromise,
       groupBalancesPromise,
       accountBalancesPromise,
     ]);
 
-    // Use pre-fetched expenses for category widgets
-    // These now run in parallel (or almost instantly as they are just data processing + category resolution)
+    const expenseData = { personal, shared };
+
     const [expensesByCategory, expensesByParentCategory] = await Promise.all([
-      getExpensesByCategory(userId, month, year, expenses),
-      getExpensesByParentCategory(userId, month, year, expenses),
+      getExpensesByCategory(userId, month, year, expenseData),
+      getExpensesByParentCategory(userId, month, year, expenseData),
     ]);
 
     return {

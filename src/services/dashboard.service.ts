@@ -702,7 +702,8 @@ export const getDashboardSummary = async (userId: string, month?: number, year?:
     // For 'totalExpenses' (Cash Out), we can use the stats from transaction service or our calculated myTotalExpenses.
     // However, usually 'Total Expenses' in Hero refers to 'My Consumption' (Personal + Shared).
     // Let's keep totalExpenses as 'My Consumption' for consistency with the 4-column layout logic.
-    const totalExpenses = myTotalExpenses;
+    // UPDATE: User requested to match "Total Expenses" widget exactly (Cash Out).
+    const totalExpenses = txStats.totalExpense;
 
     const savings = income - myTotalExpenses;
 

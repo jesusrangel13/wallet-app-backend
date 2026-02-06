@@ -3,6 +3,7 @@ import { updateMonthlySummary } from './summary.service';
 import { prisma } from '../utils/prisma';
 import logger from '../utils/logger';
 import { SmartInsightsService } from './smartInsights.service';
+import * as transactionService from './transaction.service';
 
 const smartInsightsService = new SmartInsightsService();
 
@@ -688,6 +689,25 @@ export const getDashboardSummary = async (userId: string, month?: number, year?:
 
     const expenseData = { personal, shared };
 
+    // Calculate totals for Hero Widget Carousel
+    const totalPersonal = personal.reduce((sum, item) => sum + Number(item.amount), 0);
+    const totalShared = shared.reduce((sum, item) => sum + Number(item.amountOwed), 0);
+    const myTotalExpenses = totalPersonal + totalShared;
+
+    // FIX: Use transactionService.getTransactionStats for INCOME to ensure 100% consistency with MonthlyIncomeWidget
+    // This handles filters for loans, debt collection, etc. that simple cashFlow queries miss.
+    const txStats = await transactionService.getTransactionStats(userId, targetMonth + 1, targetYear);
+    const income = txStats.totalIncome;
+
+    // For 'totalExpenses' (Cash Out), we can use the stats from transaction service or our calculated myTotalExpenses.
+    // However, usually 'Total Expenses' in Hero refers to 'My Consumption' (Personal + Shared).
+    // Let's keep totalExpenses as 'My Consumption' for consistency with the 4-column layout logic.
+    const totalExpenses = myTotalExpenses;
+
+    const savings = income - myTotalExpenses;
+
+    // Note: We ignore 'cashFlow' array for the single-number summary now, relying on the robust service.
+
     const [expensesByCategory, expensesByParentCategory] = await Promise.all([
       getExpensesByCategory(userId, month, year, expenseData),
       getExpensesByParentCategory(userId, month, year, expenseData),
@@ -695,6 +715,14 @@ export const getDashboardSummary = async (userId: string, month?: number, year?:
 
     return {
       heroBalance,
+      expenseSummary: {
+        personal: totalPersonal,
+        shared: totalShared,
+        myTotalExpenses,
+        income,
+        totalExpenses,
+        savings
+      },
       insights,
       cashFlow,
       expensesByCategory,

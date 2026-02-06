@@ -2,258 +2,208 @@ import { resolveCategoriesBatch } from './categoryResolver.service';
 import { updateMonthlySummary } from './summary.service';
 import { prisma } from '../utils/prisma';
 import logger from '../utils/logger';
+import { SmartInsightsService } from './smartInsights.service';
 
-export const getCashFlow = async (userId: string, months: number = 6, endDate?: Date) => {
-  const end = endDate || new Date();
-  const startDate = new Date(end);
-  startDate.setMonth(startDate.getMonth() - months);
+const smartInsightsService = new SmartInsightsService();
 
-  // Get transactions grouped by month
-  const transactions = await prisma.transaction.findMany({
+export const getHeroBalance = async (userId: string) => {
+  // 1. Get current total balance
+  const accounts = await prisma.account.findMany({
+    where: {
+      userId,
+      isArchived: false,
+      includeInTotalBalance: true
+    },
+    select: { balance: true }
+  });
+
+  const currentBalance = accounts.reduce((sum, acc) => sum + Number(acc.balance), 0);
+
+  // 2. Calculate balance at end of last month
+  // We start from current balance and reverse transactions from NOW until End of Last Month
+  const now = new Date();
+  const firstDayOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastDayOfLastMonth = new Date(firstDayOfCurrentMonth);
+  lastDayOfLastMonth.setMilliseconds(-1);
+
+  // Get transactions from (LastDayOfLastMonth + 1ms) to NOW
+  // All these transactions happened AFTER the comparison point, so we reverse them.
+  const recentTransactions = await prisma.transaction.findMany({
     where: {
       userId,
       date: {
-        gte: startDate,
-        lte: end,
+        gt: lastDayOfLastMonth, // Strictly greater than end of last month
       },
+      account: {
+        includeInTotalBalance: true
+      }
     },
     select: {
-      date: true,
       type: true,
-      amount: true,
-    },
-    orderBy: {
-      date: 'asc',
-    },
+      amount: true
+    }
   });
 
-  // Group by month and calculate income/expense
-  const monthlyData: Record<string, { income: number; expense: number }> = {};
+  let previousBalance = currentBalance;
 
-  transactions.forEach((tx) => {
-    const monthKey = tx.date.toISOString().slice(0, 7); // YYYY-MM format
-    if (!monthlyData[monthKey]) {
-      monthlyData[monthKey] = { income: 0, expense: 0 };
-    }
-
+  recentTransactions.forEach(tx => {
+    // Reverse the effect
     if (tx.type === 'INCOME') {
-      monthlyData[monthKey].income += Number(tx.amount);
+      previousBalance -= Number(tx.amount);
     } else if (tx.type === 'EXPENSE') {
-      monthlyData[monthKey].expense += Number(tx.amount);
+      previousBalance += Number(tx.amount);
     }
   });
 
-  // Convert to array with month names
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const result = Object.entries(monthlyData)
-    .map(([monthKey, data]) => {
-      const [year, month] = monthKey.split('-');
-      return {
-        month: monthNames[parseInt(month) - 1],
-        year,
-        income: data.income,
-        expense: data.expense,
-      };
-    })
-    .slice(-months); // Last N months
+  const changeAmount = currentBalance - previousBalance;
+  const changePercent = previousBalance !== 0 ? (changeAmount / Math.abs(previousBalance)) * 100 : 0;
 
-  return result;
-};
-
-export const getExpensesByCategory = async (
-  userId: string,
-  month?: number,
-  year?: number,
-  data?: {
-    personal: { categoryId: string | null; amount: any }[];
-    shared: { expense: { categoryId: string | null }; amountOwed: any }[];
-  }
-) => {
-  let personalTransactions;
-  let sharedParticipations;
-
-  if (data) {
-    personalTransactions = data.personal;
-    sharedParticipations = data.shared;
-  } else {
-    // Fallback if called individually (replicate improved logic)
-    const now = new Date();
-    const targetMonth = month !== undefined ? month : now.getMonth();
-    const targetYear = year !== undefined ? year : now.getFullYear();
-    const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
-    const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59, 999);
-
-    // 1. Personal
-    personalTransactions = await prisma.transaction.findMany({
-      where: {
-        userId,
-        type: 'EXPENSE',
-        sharedExpenseId: null,
-        loanId: null,
-        date: { gte: firstDayOfMonth, lte: lastDayOfMonth },
-      },
-      select: { categoryId: true, amount: true },
-    });
-
-    // 2. Shared
-    sharedParticipations = await prisma.expenseParticipant.findMany({
-      where: {
-        userId,
-        expense: { date: { gte: firstDayOfMonth, lte: lastDayOfMonth } },
-      },
-      select: {
-        amountOwed: true,
-        expense: { select: { categoryId: true } },
-      },
-    });
-  }
-
-  // Resolve categories
-  const categoryIds = [
-    ...personalTransactions.map((e) => e.categoryId),
-    ...sharedParticipations.map((e) => e.expense.categoryId),
-  ];
-  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
-
-  // Exclude 'Inversiones' (Income Type) logic from summary service to match Savings
-  // We'll filter in memory for simplicity/performance
-  // Note: we need to check if the resolved category name is 'Inversiones' AND type is INCOME?
-  // Or just rely on the fact that if it was 'Inversiones' it might be excluded.
-  // The summary service fetches the template ID. Here we have resolved categories.
-  // We will assume standard filtering for now.
-
-  const categoryData: Record<string, number> = {};
-  let totalExpenses = 0;
-
-  // Process Personal
-  personalTransactions.forEach((expense) => {
-    const categoryInfo = expense.categoryId ? categoryMap.get(expense.categoryId) : null;
-    const categoryName = categoryInfo?.name || 'Uncategorized';
-
-    // Explicit exclusion for "Inversiones" if it mimics summary logic?
-    // User complaint is about sum. If we include it here, sum is higher.
-    // If summary excludes it, we should too.
-    if (categoryName === 'Inversiones') return;
-
-    const amount = Number(expense.amount);
-    if (!categoryData[categoryName]) categoryData[categoryName] = 0;
-    categoryData[categoryName] += amount;
-    totalExpenses += amount;
-  });
-
-  // Process Shared
-  sharedParticipations.forEach((part) => {
-    const categoryId = part.expense.categoryId;
-    const categoryInfo = categoryId ? categoryMap.get(categoryId) : null;
-    const categoryName = categoryInfo?.name || 'Uncategorized';
-
-    if (categoryName === 'Inversiones') return;
-
-    const amount = Number(part.amountOwed);
-    if (!categoryData[categoryName]) categoryData[categoryName] = 0;
-    categoryData[categoryName] += amount;
-    totalExpenses += amount;
-  });
-
-  return Object.entries(categoryData).map(([category, amount]) => ({
-    category,
-    amount,
-    percentage: totalExpenses > 0 ? (amount / totalExpenses) * 100 : 0,
-  }));
-};
-
-export const getExpensesByParentCategory = async (
-  userId: string,
-  month?: number,
-  year?: number,
-  data?: {
-    personal: { categoryId: string | null; amount: any }[];
-    shared: { expense: { categoryId: string | null }; amountOwed: any }[];
-  }
-) => {
-  let personalTransactions;
-  let sharedParticipations;
-
-  if (data) {
-    personalTransactions = data.personal;
-    sharedParticipations = data.shared;
-  } else {
-    const now = new Date();
-    const targetMonth = month !== undefined ? month : now.getMonth();
-    const targetYear = year !== undefined ? year : now.getFullYear();
-    const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
-    const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
-
-    personalTransactions = await prisma.transaction.findMany({
-      where: {
-        userId,
-        type: 'EXPENSE',
-        sharedExpenseId: null,
-        loanId: null,
-        date: { gte: firstDayOfMonth, lte: lastDayOfMonth },
-      },
-      select: { categoryId: true, amount: true },
-    });
-
-    sharedParticipations = await prisma.expenseParticipant.findMany({
-      where: {
-        userId,
-        expense: { date: { gte: firstDayOfMonth, lte: lastDayOfMonth } },
-      },
-      select: {
-        amountOwed: true,
-        expense: { select: { categoryId: true } },
-      },
-    });
-  }
-
-  const categoryIds = [
-    ...personalTransactions.map((e) => e.categoryId),
-    ...sharedParticipations.map((e) => e.expense.categoryId),
-  ];
-  const categoryMap = await resolveCategoriesBatch(categoryIds, userId);
-
-  const categoryData: Record<
-    string,
-    { amount: number; icon: string | null; color: string | null }
-  > = {};
-  let totalExpenses = 0;
-
-  const processItem = (categoryId: string | null, amount: number) => {
-    const categoryInfo = categoryId ? categoryMap.get(categoryId) : null;
-
-    // Check exclusion
-    if (categoryInfo?.name === 'Inversiones' || categoryInfo?.parent?.name === 'Inversiones') return;
-
-    const parentCategory = categoryInfo?.parent || categoryInfo;
-    const categoryName = parentCategory?.name || 'Uncategorized';
-    const categoryIcon = parentCategory?.icon || null;
-    const categoryColor = parentCategory?.color || null;
-
-    if (!categoryData[categoryName]) {
-      categoryData[categoryName] = {
-        amount: 0,
-        icon: categoryIcon,
-        color: categoryColor,
-      };
-    }
-    categoryData[categoryName].amount += amount;
-    totalExpenses += amount;
+  return {
+    totalBalance: currentBalance,
+    previousBalance,
+    changeAmount,
+    changePercent,
+    currency: 'CLP', // Default currency, could be inferred from user settings
+    period: 'vs. mes anterior'
   };
-
-  personalTransactions.forEach(tx => processItem(tx.categoryId, Number(tx.amount)));
-  sharedParticipations.forEach(part => processItem(part.expense.categoryId, Number(part.amountOwed)));
-
-  return Object.entries(categoryData)
-    .map(([category, data]) => ({
-      category,
-      amount: data.amount,
-      percentage: totalExpenses > 0 ? (data.amount / totalExpenses) * 100 : 0,
-      icon: data.icon,
-      color: data.color,
-    }))
-    .sort((a, b) => b.amount - a.amount);
 };
+
+export const generateHeuristicInsights = async (userId: string) => {
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  // 1. Get Current Month Summary
+  const currentSummary = await getMonthlySummaryData(userId, currentMonth, currentYear);
+
+  // 2. Get Previous Month Summary
+  const prevMonthDate = new Date(now);
+  prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+  const prevSummary = await getMonthlySummaryData(userId, prevMonthDate.getMonth(), prevMonthDate.getFullYear());
+
+  const insights: Array<{ id: string; type: 'positive' | 'warning' | 'tip' | 'achievement'; title: string; description: string; action?: { label: string; href: string; } }> = [];
+
+  // Insight: Higher Income
+  if (currentSummary.income > prevSummary.income * 1.1) {
+    const increase = ((currentSummary.income - prevSummary.income) / prevSummary.income) * 100;
+    insights.push({
+      id: 'income-up',
+      type: 'positive',
+      title: 'Ingresos al alza',
+      description: `Este mes has generado un ${increase.toFixed(0)}% más que el mes anterior.`,
+    });
+  }
+
+  // Insight: High Spending Warning
+  if (currentSummary.expenses > prevSummary.expenses * 1.2) {
+    const increase = ((currentSummary.expenses - prevSummary.expenses) / prevSummary.expenses) * 100;
+    insights.push({
+      id: 'expense-warning',
+      type: 'warning',
+      title: 'Gasto inusual detectado',
+      description: `Tus gastos son un ${increase.toFixed(0)}% mayores al mes pasado.`,
+    });
+  }
+
+  // Insight: Savings Goal (Generic for now)
+  const savingsRate = currentSummary.income > 0 ? (currentSummary.savings / currentSummary.income) : 0;
+  if (savingsRate < 0.1 && currentSummary.income > 0) {
+    insights.push({
+      id: 'savings-tip',
+      type: 'tip',
+      title: 'Mejora tu ahorro',
+      description: 'Intenta ahorrar al menos el 10% de tus ingresos este mes.',
+      action: { label: 'Ver metas', href: '/dashboard/goals' }
+    });
+  } else if (savingsRate > 0.2) {
+    insights.push({
+      id: 'savings-great',
+      type: 'achievement',
+      title: '¡Gran capacidad de ahorro!',
+      description: `Estás ahorrando el ${(savingsRate * 100).toFixed(0)}% de tus ingresos.`,
+    });
+  }
+
+  // Tax Reserve Tip (Freelancer specific)
+  if (currentSummary.income > 1000000) {
+    const taxReserve = currentSummary.income * 0.1375;
+    insights.push({
+      id: 'tax-reserve',
+      type: 'tip',
+      title: 'Reserva para impuestos',
+      description: `Sugerimos apartar $${Math.round(taxReserve).toLocaleString('es-CL')} para impuestos.`,
+    });
+  }
+
+  // If no insights generated, provide a default welcome/tip
+  if (insights.length === 0) {
+    insights.push({
+      id: 'welcome-tip',
+      type: 'tip',
+      title: 'Organiza tus finanzas',
+      description: 'Revisar tus gastos semanalmente ayuda a mantener el control.',
+    });
+  }
+
+  return insights;
+};
+
+export const getSmartInsights = async (userId: string) => {
+  // 1. Get Heuristic Insights (Always fast)
+  const insights = await generateHeuristicInsights(userId);
+
+  // 2. Get Pre-Generated AI Insights (Read-Only)
+  // We do NOT trigger generation here anymore to ensure <200ms response.
+  // The generation happens via Cron Job at 1 AM.
+  try {
+    const aiInsights = await smartInsightsService.getStoredInsights(userId);
+
+    if (aiInsights && aiInsights.length > 0) {
+      return aiInsights.map(ai => ({
+        id: ai.id,
+        type: ai.type as any,
+        title: ai.title,
+        description: ai.description,
+        isAi: true
+      }));
+    }
+  } catch (err) {
+    logger.error('Failed to get stored AI insights', err);
+  }
+
+  return insights;
+};
+
+// Helper to avoid circular dependency or code duplication if getMonthlySavings is complex
+// But we can reuse getMonthlySavings if we export it or use it internally. 
+// However, getMonthlySavings calls updateMonthlySummary which might be heavy.
+// Let's rely on stored MonthlySummary for speed if available.
+export const getMonthlySummaryData = async (userId: string, month: number, year: number) => {
+  let summary = await prisma.monthlySummary.findUnique({
+    where: {
+      userId_month_year: {
+        userId,
+        month: month + 1,
+        year: year,
+      },
+    },
+  });
+
+  if (!summary) {
+    // Return zeros if not found (don't force recalc for insights to stay fast)
+    return { income: 0, expense: 0, savings: 0, expenses: 0 };
+  }
+
+  return {
+    income: Number(summary.income),
+    expenses: Number(summary.expense), // Note: 'expense' in DB vs 'expenses' in return
+    savings: Number(summary.savings)
+  };
+};
+
+
+// Moved to financeAnalysis.service.ts
+
 
 export const getBalanceHistory = async (userId: string, days: number = 30, endDate?: Date) => {
   const end = endDate || new Date();
@@ -713,6 +663,9 @@ export const getDashboardSummary = async (userId: string, month?: number, year?:
     const groupBalancesPromise = getGroupBalances(userId, month, year);
     const accountBalancesPromise = getAccountBalances(userId);
 
+    const heroBalancePromise = getHeroBalance(userId);
+    const insightsPromise = getSmartInsights(userId);
+
     const [
       personal,
       shared,
@@ -720,6 +673,8 @@ export const getDashboardSummary = async (userId: string, month?: number, year?:
       balanceHistory,
       groupBalances,
       accountBalances,
+      heroBalance,
+      insights
     ] = await Promise.all([
       personalExpensesPromise,
       sharedParticipationsPromise,
@@ -727,6 +682,8 @@ export const getDashboardSummary = async (userId: string, month?: number, year?:
       balanceHistoryPromise,
       groupBalancesPromise,
       accountBalancesPromise,
+      heroBalancePromise,
+      insightsPromise
     ]);
 
     const expenseData = { personal, shared };
@@ -737,6 +694,8 @@ export const getDashboardSummary = async (userId: string, month?: number, year?:
     ]);
 
     return {
+      heroBalance,
+      insights,
       cashFlow,
       expensesByCategory,
       expensesByParentCategory,
@@ -980,90 +939,13 @@ export const getExpensesByTag = async (userId: string, month?: number, year?: nu
   return result;
 };
 
-/**
- * Get top tags by usage for a specific month
- * Returns tags ordered by total amount spent, with statistics
- */
-export const getTopTags = async (userId: string, month?: number, year?: number, limit: number = 10) => {
-  const now = new Date();
-  const targetMonth = month !== undefined ? month : now.getMonth();
-  const targetYear = year !== undefined ? year : now.getFullYear();
-  const firstDayOfMonth = new Date(targetYear, targetMonth, 1);
-  const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0);
+// Re-export or just use imported functions. 
+// Ideally we keep the signatures compatible if other parts of the app use them.
+// But getExpensesByCategory etc are exported. So we should re-export them from financeAnalysis.
 
-  // Get all transactions with tags for the month
-  const transactionsWithTags = await prisma.transactionTag.findMany({
-    where: {
-      transaction: {
-        userId,
-        date: {
-          gte: firstDayOfMonth,
-          lte: lastDayOfMonth,
-        },
-      },
-    },
-    include: {
-      tag: true,
-      transaction: {
-        select: {
-          amount: true,
-          type: true,
-        },
-      },
-    },
-  });
+export { getCashFlow, getExpensesByCategory, getExpensesByParentCategory, getTopTags } from './financeAnalysis.service';
+import { getCashFlow, getExpensesByCategory, getExpensesByParentCategory, getTopTags } from './financeAnalysis.service';
 
-  // Group by tag and calculate statistics
-  const tagStats: Record<string, {
-    tagId: string;
-    tagName: string;
-    tagColor: string | null;
-    amounts: number[];
-    types: string[];
-  }> = {};
-
-  transactionsWithTags.forEach((tt) => {
-    const tagId = tt.tag.id;
-    const tagName = tt.tag.name;
-    const tagColor = tt.tag.color;
-    const amount = Number(tt.transaction.amount);
-    const type = tt.transaction.type;
-
-    if (!tagStats[tagId]) {
-      tagStats[tagId] = {
-        tagId,
-        tagName,
-        tagColor,
-        amounts: [],
-        types: [],
-      };
-    }
-
-    tagStats[tagId].amounts.push(amount);
-    tagStats[tagId].types.push(type);
-  });
-
-  // Calculate final statistics and convert to array
-  const result = Object.entries(tagStats)
-    .map(([tagId, data]) => {
-      const totalAmount = data.amounts.reduce((sum, amount) => sum + amount, 0);
-      const transactionCount = data.amounts.length;
-      const averageAmount = transactionCount > 0 ? totalAmount / transactionCount : 0;
-
-      return {
-        tagId: data.tagId,
-        tagName: data.tagName,
-        tagColor: data.tagColor,
-        transactionCount,
-        totalAmount,
-        averageAmount,
-      };
-    })
-    .sort((a, b) => b.totalAmount - a.totalAmount)
-    .slice(0, limit);
-
-  return result;
-};
 
 /**
  * Get tag trend over time

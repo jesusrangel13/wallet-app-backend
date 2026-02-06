@@ -29,6 +29,8 @@ import loanRoutes from './routes/loan.routes';
 import voiceRoutes from './routes/voice.routes';
 import { CategoryTemplateService } from './services/categoryTemplate.service';
 import logger from './utils/logger';
+import { initCronJobs } from './scheduler';
+
 
 // Load environment variables (via env.ts)
 
@@ -132,6 +134,10 @@ app.listen(PORT, () => {
   logger.info(`Environment: ${env.NODE_ENV}`);
   logger.info(`Health check: http://localhost:${PORT}/health`);
   logger.info(`API Docs: http://localhost:${PORT}/api-docs`);
+
+  // Initialize Internal Cron Scheduler
+  // This allows running scheduled tasks even on limited hosting (e.g. Render Free Tier)
+  initCronJobs();
 });
 
 export default app;

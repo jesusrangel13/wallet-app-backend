@@ -20,6 +20,7 @@
     "validate:migration": "ts-node scripts/validate-migration.ts",
     "cleanup:legacy": "ts-node scripts/cleanup-legacy-categories.ts",
     "fix:shared-expenses": "ts-node src/scripts/linkSharedExpenseTransactions.ts",
+    "cron:daily-insights": "node dist/cron/generateDailyInsights.js",
     "recalculate:balances": "ts-node src/scripts/recalculateBalances.ts"
   },
   "keywords": [
@@ -44,6 +45,7 @@
     "isomorphic-dompurify": "^2.34.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
+    "node-cron": "^4.2.1",
     "sugar-date": "^2.0.6",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
@@ -61,6 +63,7 @@
     "@types/jsonwebtoken": "^9.0.5",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.10.5",
+    "@types/node-cron": "^3.0.11",
     "@types/supertest": "^6.0.3",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",

@@ -7,8 +7,8 @@ import * as transactionService from './transaction.service';
 
 const smartInsightsService = new SmartInsightsService();
 
-export const getHeroBalance = async (userId: string) => {
-  // 1. Get current total balance
+export const getHeroBalance = async (userId: string, month?: number, year?: number) => {
+  // 1. Get current total balance (The Anchor)
   const accounts = await prisma.account.findMany({
     where: {
       userId,
@@ -18,54 +18,96 @@ export const getHeroBalance = async (userId: string) => {
     select: { balance: true }
   });
 
-  const currentBalance = accounts.reduce((sum, acc) => sum + Number(acc.balance), 0);
+  const currentRealBalance = accounts.reduce((sum, acc) => sum + Number(acc.balance), 0);
 
-  // 2. Calculate balance at end of last month
-  // We start from current balance and reverse transactions from NOW until End of Last Month
+  // 2. Determine Dates
   const now = new Date();
-  const firstDayOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastDayOfLastMonth = new Date(firstDayOfCurrentMonth);
-  lastDayOfLastMonth.setMilliseconds(-1);
+  let targetDate = new Date(now);
+  let prevDate = new Date(now);
+  let isHistorical = false;
 
-  // Get transactions from (LastDayOfLastMonth + 1ms) to NOW
-  // All these transactions happened AFTER the comparison point, so we reverse them.
-  const recentTransactions = await prisma.transaction.findMany({
-    where: {
-      userId,
-      date: {
-        gt: lastDayOfLastMonth, // Strictly greater than end of last month
+  if (month !== undefined && year !== undefined) {
+    // Set to End of Selected Month (e.g., Jan 31 23:59:59)
+    targetDate = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
+    // Set Prev Date to End of Previous Month (e.g., Dec 31 23:59:59)
+    prevDate = new Date(year, month, 0, 23, 59, 59, 999);
+
+    if (targetDate.getMonth() !== now.getMonth() || targetDate.getFullYear() !== now.getFullYear()) {
+      isHistorical = true;
+    }
+  } else {
+    // Default: 'Now' vs 'End of Last Month'
+    // This matches the original logic: Compare Current Balance vs Balance at End of Last Month
+    prevDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+  }
+
+  const getBalanceAtDate = async (baseBalance: number, fromDate: Date, toDate: Date): Promise<number> => {
+    // If dates are essentially same, return base
+    if (Math.abs(fromDate.getTime() - toDate.getTime()) < 1000) return baseBalance;
+
+    // Ensure we query correctly based on direction
+    const isReversing = toDate < fromDate;
+    const start = isReversing ? toDate : fromDate;
+    const end = isReversing ? fromDate : toDate;
+
+    // Fetch transactions in range
+    const transactions = await prisma.transaction.findMany({
+      where: {
+        userId,
+        date: {
+          gt: start,
+          lte: end
+        },
+        account: { includeInTotalBalance: true }
       },
-      account: {
-        includeInTotalBalance: true
+      select: { type: true, amount: true }
+    });
+
+    let adjustment = 0;
+    transactions.forEach(tx => {
+      const amount = Number(tx.amount);
+      if (tx.type === 'INCOME') {
+        adjustment += amount; // Income adds to balance
+      } else if (tx.type === 'EXPENSE') {
+        adjustment -= amount; // Expense subtracts
       }
-    },
-    select: {
-      type: true,
-      amount: true
+    });
+
+    if (isReversing) {
+      // We are going BACKWARDS from 'fromDate' (Future) to 'toDate' (Past)
+      // To get Past Balance, we must UNDO the transactions.
+      // Balance_Past = Balance_Future - (Income - Expense) = Balance_Future - Adjustment
+      return baseBalance - adjustment;
+    } else {
+      // We are going FORWARD from 'fromDate' (Past) to 'toDate' (Future)
+      // Balance_Future = Balance_Past + (Income - Expense) = Balance_Past + Adjustment
+      return baseBalance + adjustment;
     }
-  });
+  };
 
-  let previousBalance = currentBalance;
+  // 3. Calculate Balances
+  // A. Balance at Target Date
+  // Calculate from 'now' to 'targetDate'
+  const balanceAtTarget = await getBalanceAtDate(currentRealBalance, now, targetDate);
 
-  recentTransactions.forEach(tx => {
-    // Reverse the effect
-    if (tx.type === 'INCOME') {
-      previousBalance -= Number(tx.amount);
-    } else if (tx.type === 'EXPENSE') {
-      previousBalance += Number(tx.amount);
-    }
-  });
+  // B. Balance at Previous Period Date
+  // Calculate from 'targetDate' to 'prevDate'
+  // Using balanceAtTarget as base makes it efficient (chaining)
+  const balanceAtPrev = await getBalanceAtDate(balanceAtTarget, targetDate, prevDate);
 
-  const changeAmount = currentBalance - previousBalance;
-  const changePercent = previousBalance !== 0 ? (changeAmount / Math.abs(previousBalance)) * 100 : 0;
+  const changeAmount = balanceAtTarget - balanceAtPrev;
+  const changePercent = balanceAtPrev !== 0 ? (changeAmount / Math.abs(balanceAtPrev)) * 100 : 0;
 
   return {
-    totalBalance: currentBalance,
-    previousBalance,
+    totalBalance: balanceAtTarget,
+    previousBalance: balanceAtPrev,
     changeAmount,
     changePercent,
-    currency: 'CLP', // Default currency, could be inferred from user settings
-    period: 'vs. mes anterior'
+    currency: 'CLP',
+    period: isHistorical
+      ? `vs. mes anterior (${prevDate.toLocaleString('es-CL', { month: 'long' })})`
+      : 'vs. mes anterior'
   };
 };
 
@@ -368,6 +410,20 @@ export const getGroupBalances = async (userId: string, month?: number, year?: nu
     return [];
   }
 
+  // Prepare date filter (Effective Date <= End of Selected Month)
+  // If no date selected, effective date is NOW (no filter on upper bound, technically)
+  // But for consistency, let's treat "no date" as "Everything".
+
+  let dateFilter: any = {};
+  if (month !== undefined && year !== undefined) {
+    const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
+    dateFilter = {
+      date: {
+        lte: endOfMonth
+      }
+    };
+  }
+
   // 1. Fetch Group Details (lightweight)
   const groups = await prisma.group.findMany({
     where: { id: { in: groupIds } },
@@ -391,14 +447,22 @@ export const getGroupBalances = async (userId: string, month?: number, year?: nu
   // A. Expenses Paid (Credits)
   const expensesPaid = await prisma.sharedExpense.groupBy({
     by: ['groupId', 'paidByUserId'],
-    where: { groupId: { in: groupIds } },
+    where: {
+      groupId: { in: groupIds },
+      ...dateFilter
+    },
     _sum: { amount: true },
   });
 
   // B. Expenses Participation (Debts)
   // Prisma doesn't support grouping by relation field (expense.groupId) directly, so we fetch lightweight objects
   const expenseParticipations = await prisma.expenseParticipant.findMany({
-    where: { expense: { groupId: { in: groupIds } } },
+    where: {
+      expense: {
+        groupId: { in: groupIds },
+        ...dateFilter
+      }
+    },
     select: {
       amountOwed: true,
       userId: true,
@@ -409,23 +473,60 @@ export const getGroupBalances = async (userId: string, month?: number, year?: nu
   });
 
   // C. Payments Sent (Debts Reduced)
+  // Payment doesn't have a 'date' field directly usually, it has createdAt. 
+  // Schema check needed? Usually 'createdAt' is used for date.
+  // Assuming 'createdAt' represents the payment date.
+  // Wait, I need to check schema or usage. Transaction has 'date'. Payment has 'createdAt'?
+  // Let's assume 'createdAt' for Payment.
+
+  let paymentDateFilter: any = {};
+  if (month !== undefined && year !== undefined) {
+    const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999);
+    paymentDateFilter = {
+      createdAt: {
+        lte: endOfMonth
+      }
+    };
+  }
+
   const paymentsSent = await prisma.payment.groupBy({
     by: ['groupId', 'fromUserId'],
-    where: { groupId: { in: groupIds } },
+    where: {
+      groupId: { in: groupIds },
+      ...paymentDateFilter
+    },
     _sum: { amount: true },
   });
 
   // D. Payments Received (Credits Reduced)
   const paymentsReceived = await prisma.payment.groupBy({
     by: ['groupId', 'toUserId'],
-    where: { groupId: { in: groupIds } },
+    where: {
+      groupId: { in: groupIds },
+      ...paymentDateFilter
+    },
     _sum: { amount: true },
   });
 
-  // E. Shared Expenses Total per Group (for display)
+  // E. Shared Expenses Total per Group (for display - DISCRETE MONTHLY TOTAL)
+  // We want to show "Spending THIS month", not "Total Spending All Time"
+  let discreteDateFilter: any = { ...dateFilter };
+  if (month !== undefined && year !== undefined) {
+    const startOfMonth = new Date(year, month, 1);
+    discreteDateFilter = {
+      date: {
+        gte: startOfMonth,
+        ...dateFilter.date
+      }
+    };
+  }
+
   const sharedExpensesTotals = await prisma.sharedExpense.groupBy({
     by: ['groupId'],
-    where: { groupId: { in: groupIds } },
+    where: {
+      groupId: { in: groupIds },
+      ...discreteDateFilter
+    },
     _sum: { amount: true },
   });
 
@@ -664,7 +765,7 @@ export const getDashboardSummary = async (userId: string, month?: number, year?:
     const groupBalancesPromise = getGroupBalances(userId, month, year);
     const accountBalancesPromise = getAccountBalances(userId);
 
-    const heroBalancePromise = getHeroBalance(userId);
+    const heroBalancePromise = getHeroBalance(userId, month, year);
     const insightsPromise = getSmartInsights(userId);
 
     const [

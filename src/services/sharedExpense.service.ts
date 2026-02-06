@@ -1295,12 +1295,10 @@ export const getUserBalances = async (userId: string, month?: number, year?: num
     const whereClause: any = { groupId };
 
     if (month !== undefined && year !== undefined) {
-      // Filter expenses by month and year
-      const startDate = new Date(year, month, 1);
+      // Filter expenses up to the end of the selected month (Cumulative Balance)
       const endDate = new Date(year, month + 1, 0, 23, 59, 59, 999);
 
       whereClause.date = {
-        gte: startDate,
         lte: endDate,
       };
     }
@@ -1334,6 +1332,12 @@ export const getUserBalances = async (userId: string, month?: number, year?: num
     let othersOweMe = 0;
     const peopleWhoOweMe: Record<string, { amount: number; totalHistorical: number; totalPaid: number; user: any; unpaidExpenses: any[]; paidExpenses: any[] }> = {};
 
+    // Calculate start date for discrete filtering (Activity View)
+    let startDate: Date | undefined;
+    if (month !== undefined && year !== undefined) {
+      startDate = new Date(year, month, 1);
+    }
+
     expenses.forEach((expense) => {
       if (expense.paidByUserId === userId) {
         expense.participants.forEach((participant) => {
@@ -1352,26 +1356,47 @@ export const getUserBalances = async (userId: string, month?: number, year?: num
 
             const amountOwed = Number(participant.amountOwed);
 
-            if (!participant.isPaid) {
-              // Unpaid expense
+            // Determine effective paid status based on date filter
+            let effectiveIsPaid = participant.isPaid;
+            if (month !== undefined && year !== undefined && participant.isPaid && participant.paidDate) {
+              const endDate = new Date(year, month + 1, 0, 23, 59, 59, 999);
+              if (participant.paidDate > endDate) {
+                // Paid AFTER the filter date, so logically it was still UNPAID at that time
+                effectiveIsPaid = false;
+              }
+            }
+
+            if (!effectiveIsPaid) {
+              // Unpaid expense - ALWAYS include in cumulative balance
               othersOweMe += amountOwed;
               peopleWhoOweMe[participant.userId].amount += amountOwed;
-              peopleWhoOweMe[participant.userId].unpaidExpenses.push({
-                expenseId: expense.id,
-                description: expense.description,
-                amount: amountOwed,
-                date: expense.date,
-              });
+
+              const isRelevant = !startDate || expense.date >= startDate;
+              if (isRelevant) {
+                peopleWhoOweMe[participant.userId].unpaidExpenses.push({
+                  expenseId: expense.id,
+                  description: expense.description,
+                  amount: amountOwed,
+                  date: expense.date,
+                });
+              }
             } else {
-              // Paid expense
-              peopleWhoOweMe[participant.userId].totalPaid += amountOwed;
-              peopleWhoOweMe[participant.userId].paidExpenses.push({
-                expenseId: expense.id,
-                description: expense.description,
-                amount: amountOwed,
-                date: expense.date,
-                paidDate: participant.paidDate,
-              });
+              // Paid expense - ONLY include in list if relevant to this month (Activity View)
+              // Relevant if: Created this month OR Paid this month
+              // Paid expense - ONLY include in list if relevant to this month (Strict Accrual View)
+              // User Request: Only show expenses belonging to this month, regardless of payment date.
+              const isRelevant = !startDate || expense.date >= startDate;
+
+              if (isRelevant) {
+                peopleWhoOweMe[participant.userId].totalPaid += amountOwed;
+                peopleWhoOweMe[participant.userId].paidExpenses.push({
+                  expenseId: expense.id,
+                  description: expense.description,
+                  amount: amountOwed,
+                  date: expense.date,
+                  paidDate: participant.paidDate,
+                });
+              }
             }
 
             // Add to historical total
@@ -1402,26 +1427,44 @@ export const getUserBalances = async (userId: string, month?: number, year?: num
 
         const amountOwed = Number(myParticipation.amountOwed);
 
-        if (!myParticipation.isPaid) {
-          // Unpaid expense
+        // Determine effective paid status based on date filter
+        let effectiveIsPaid = myParticipation.isPaid;
+        if (month !== undefined && year !== undefined && myParticipation.isPaid && myParticipation.paidDate) {
+          const endDate = new Date(year, month + 1, 0, 23, 59, 59, 999);
+          if (myParticipation.paidDate > endDate) {
+            // Paid AFTER the filter date, so logically it was still UNPAID at that time
+            effectiveIsPaid = false;
+          }
+        }
+
+        if (!effectiveIsPaid) {
+          // Unpaid expense - ALWAYS include in cumulative balance
           iOweOthers += amountOwed;
           peopleIOweTo[expense.paidByUserId].amount += amountOwed;
-          peopleIOweTo[expense.paidByUserId].unpaidExpenses.push({
-            expenseId: expense.id,
-            description: expense.description,
-            amount: amountOwed,
-            date: expense.date,
-          });
+
+          const isRelevant = !startDate || expense.date >= startDate;
+          if (isRelevant) {
+            peopleIOweTo[expense.paidByUserId].unpaidExpenses.push({
+              expenseId: expense.id,
+              description: expense.description,
+              amount: amountOwed,
+              date: expense.date,
+            });
+          }
         } else {
-          // Paid expense
-          peopleIOweTo[expense.paidByUserId].totalPaid += amountOwed;
-          peopleIOweTo[expense.paidByUserId].paidExpenses.push({
-            expenseId: expense.id,
-            description: expense.description,
-            amount: amountOwed,
-            date: expense.date,
-            paidDate: myParticipation.paidDate,
-          });
+          // Paid expense - ONLY include in list if relevant to this month (Strict Accrual View)
+          const isRelevant = !startDate || expense.date >= startDate;
+
+          if (isRelevant) {
+            peopleIOweTo[expense.paidByUserId].totalPaid += amountOwed;
+            peopleIOweTo[expense.paidByUserId].paidExpenses.push({
+              expenseId: expense.id,
+              description: expense.description,
+              amount: amountOwed,
+              date: expense.date,
+              paidDate: myParticipation.paidDate,
+            });
+          }
         }
 
         // Add to historical total
@@ -1429,8 +1472,12 @@ export const getUserBalances = async (userId: string, month?: number, year?: num
       }
     });
 
-    // Calculate total shared expenses for the group
+    // Calculate total shared expenses for the group (Discrete Monthly Total)
     const totalSharedExpenses = expenses.reduce((sum, expense) => {
+      // Only sum expenses CREATED in this interval (Discrete View)
+      if (startDate && expense.date < startDate) {
+        return sum;
+      }
       return sum + Number(expense.amount);
     }, 0);
 

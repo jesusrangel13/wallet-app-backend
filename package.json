@@ -21,7 +21,8 @@
     "cleanup:legacy": "ts-node scripts/cleanup-legacy-categories.ts",
     "fix:shared-expenses": "ts-node src/scripts/linkSharedExpenseTransactions.ts",
     "cron:daily-insights": "node dist/cron/generateDailyInsights.js",
-    "recalculate:balances": "ts-node src/scripts/recalculateBalances.ts"
+    "recalculate:balances": "ts-node src/scripts/recalculateBalances.ts",
+    "fix:categories:prod": "node dist/scripts/fix_shared_expenses_categories.js"
   },
   "keywords": [
     "finance",

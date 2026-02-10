@@ -234,3 +234,31 @@ export const getUniquePayees = async (
     next(error);
   }
 };
+
+export const getLastTransactionByPayee = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = req.user!.userId;
+    const payee = req.query.payee as string;
+
+    if (!payee) {
+      res.status(400).json({
+        success: false,
+        message: 'Payee is required',
+      });
+      return;
+    }
+
+    const transaction = await transactionService.getLastTransactionByPayee(userId, payee);
+
+    res.status(200).json({
+      success: true,
+      data: transaction,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

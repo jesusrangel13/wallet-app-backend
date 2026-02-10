@@ -799,6 +799,35 @@ export const deleteTransaction = async (userId: string, transactionId: string) =
   return { message: 'Transaction deleted successfully' };
 };
 
+export const getLastTransactionByPayee = async (userId: string, payee: string) => {
+  const transaction = await prisma.transaction.findFirst({
+    where: {
+      userId,
+      payee: {
+        equals: payee,
+        mode: 'insensitive', // Search case-insensitive
+      },
+    },
+    orderBy: {
+      date: 'desc',
+    },
+    include: {
+      account: {
+        select: { name: true, currency: true, type: true },
+      },
+    }
+  });
+
+  if (!transaction) {
+    return null;
+  }
+
+  // Resolve category information
+  const category = await resolveCategoryById(transaction.categoryId, userId);
+
+  return { ...transaction, category };
+};
+
 export const getTransactionsByCategory = async (userId: string) => {
   const transactions = await prisma.transaction.findMany({
     where: { userId },

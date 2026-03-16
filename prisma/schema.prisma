@@ -21,6 +21,11 @@ model User {
   createdAt                     DateTime                  @default(now()) @map("created_at")
   updatedAt                     DateTime                  @updatedAt @map("updated_at")
   defaultSharedExpenseAccountId String?                   @map("default_shared_expense_account_id")
+  // ── SnapTrade fields (Fase 7 — OAuth con brokers globales) ────────────────
+  // snaptradeUserSecret se guarda ENCRIPTADO con AES-256-GCM (ver encryption.ts)
+  snaptradeUserId               String?                   @unique @map("snaptrade_user_id")
+  snaptradeUserSecret           String?                   @map("snaptrade_user_secret")
+  // ──────────────────────────────────────────────────────────────────────────
   accounts                      Account[]
   budgets                       Budget[]
   expenseParticipations         ExpenseParticipant[]
@@ -42,34 +47,45 @@ model User {
   defaultSharedExpenseAccount   Account?                  @relation("DefaultSharedExpenseAccount", fields: [defaultSharedExpenseAccountId], references: [id])
   monthlySummaries              MonthlySummary[]
   aiInsights                    AiInsight[]
+  investmentPositions           InvestmentPosition[]
+  investmentTransactions        InvestmentTransaction[]
 
   @@map("users")
 }
 
 model Account {
-  id                                   String          @id @default(uuid())
-  userId                               String          @map("user_id")
+  id                                   String               @id @default(uuid())
+  userId                               String               @map("user_id")
   name                                 String
   type                                 AccountType
-  balance                              Decimal         @db.Decimal(15, 2)
-  currency                             String          @default("CLP")
-  isDefault                            Boolean         @default(false) @map("is_default")
-  creditLimit                          Decimal?        @map("credit_limit") @db.Decimal(15, 2)
-  billingDay                           Int?            @map("billing_day")
-  createdAt                            DateTime        @default(now()) @map("created_at")
-  updatedAt                            DateTime        @updatedAt @map("updated_at")
-  isArchived                           Boolean         @default(false) @map("is_archived")
-  includeInTotalBalance                Boolean         @default(true) @map("include_in_total_balance")
-  accountNumber                        String?         @map("account_number")
+  balance                              Decimal              @db.Decimal(15, 2)
+  currency                             String               @default("CLP")
+  isDefault                            Boolean              @default(false) @map("is_default")
+  creditLimit                          Decimal?             @map("credit_limit") @db.Decimal(15, 2)
+  billingDay                           Int?                 @map("billing_day")
+  createdAt                            DateTime             @default(now()) @map("created_at")
+  updatedAt                            DateTime             @updatedAt @map("updated_at")
+  isArchived                           Boolean              @default(false) @map("is_archived")
+  includeInTotalBalance                Boolean              @default(true) @map("include_in_total_balance")
+  accountNumber                        String?              @map("account_number")
   color                                String?
-  user                                 User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // ── Broker fields (solo cuando type = INVESTMENT) ──────────────────────────
+  isBrokerAccount                      Boolean              @default(false) @map("is_broker_account")
+  brokerName                           String?              @map("broker_name")   // "Hapi", "IBKR"
+  brokerSyncMethod                     BrokerSyncMethod?    @map("broker_sync_method")
+  lastSyncedAt                         DateTime?            @map("last_synced_at")
+  // ──────────────────────────────────────────────────────────────────────────
+  user                                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   importHistory                        ImportHistory[]
   transactions                         Transaction[]
-  transfersDestination                 Transaction[]   @relation("TransferDestination")
-  usersWithDefaultSharedExpenseAccount User[]          @relation("DefaultSharedExpenseAccount")
+  transfersDestination                 Transaction[]        @relation("TransferDestination")
+  usersWithDefaultSharedExpenseAccount User[]               @relation("DefaultSharedExpenseAccount")
+  investmentPositions                  InvestmentPosition[]
+  investmentTransactions               InvestmentTransaction[]
 
   @@index([userId])
   @@index([userId, isArchived])
+  @@index([userId, isBrokerAccount])
   @@map("accounts")
 }
 
@@ -529,4 +545,123 @@ model AiInsight {
 
   @@index([userId, date])
   @@map("ai_insights")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BROKER / INVESTMENT ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum BrokerSyncMethod {
+  CSV_UPLOAD
+  SCRAPER_BOT
+  SNAPTRADE_API
+}
+
+enum InvestmentAssetType {
+  STOCK
+  ETF
+  CRYPTO
+  FOREX
+}
+
+enum InvestmentTransactionType {
+  BUY
+  SELL
+  DIVIDEND
+  DEPOSIT
+  WITHDRAWAL
+  FEE
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BROKER / INVESTMENT MODELS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Posiciones abiertas actuales del portafolio
+model InvestmentPosition {
+  id                 String               @id @default(uuid())
+  accountId          String               @map("account_id")
+  userId             String               @map("user_id")
+  ticker             String               // "AAPL", "BTC", "VOO"
+  assetName          String?              @map("asset_name")
+  assetType          InvestmentAssetType  @map("asset_type")
+  shares             Decimal              @db.Decimal(20, 8)  // Alta precisión para crypto
+  averageCost        Decimal              @map("average_cost") @db.Decimal(15, 4)
+  currency           String               @default("USD")
+  lastKnownPrice     Decimal?             @map("last_known_price") @db.Decimal(15, 4)
+  lastPriceUpdatedAt DateTime?            @map("last_price_updated_at")
+  change24h          Decimal?             @map("change_24h") @db.Decimal(10, 4)
+  // P&L realizado acumulado al ejecutar ventas (SELL)
+  realizedPnL        Decimal              @default(0) @map("realized_pnl") @db.Decimal(15, 4)
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  account            Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions       InvestmentTransaction[]
+
+  @@unique([accountId, ticker])
+  @@index([accountId])
+  @@index([userId])
+  @@index([ticker])
+  @@map("investment_positions")
+}
+
+// Historial completo de operaciones del broker
+model InvestmentTransaction {
+  id          String                    @id @default(uuid())
+  accountId   String                    @map("account_id")
+  userId      String                    @map("user_id")
+  positionId  String?                   @map("position_id")    // null para DEPOSIT/WITHDRAWAL
+  ticker      String?                                           // null para DEPOSIT/WITHDRAWAL
+  assetType   InvestmentAssetType?      @map("asset_type")
+  type        InvestmentTransactionType
+  shares      Decimal?                  @db.Decimal(20, 8)
+  price       Decimal?                  @db.Decimal(15, 4)     // precio de ejecución unitario
+  totalAmount Decimal                   @map("total_amount") @db.Decimal(15, 2)
+  fees        Decimal                   @default(0) @db.Decimal(10, 4)
+  currency    String                    @default("USD")
+  date        DateTime
+  notes       String?
+  // Deduplication hash: MD5(ticker+date.toISOString()+type+totalAmount+shares+price)
+  // Incluye shares y price para evitar colisiones en DCA con mismo ticker/fecha (Mejora #4)
+  sourceHash  String?                   @unique @map("source_hash")
+  rawData     Json?                     @map("raw_data")        // fila CSV original (para auditoría)
+  createdAt   DateTime                  @default(now()) @map("created_at")
+  updatedAt   DateTime                  @updatedAt @map("updated_at")
+
+  account     Account                   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user        User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position    InvestmentPosition?       @relation(fields: [positionId], references: [id])
+
+  @@index([accountId])
+  @@index([userId])
+  @@index([positionId])
+  @@index([date])
+  @@index([accountId, date])
+  @@index([userId, date])
+  @@map("investment_transactions")
+}
+
+// Cache de precios para respetar rate limits de APIs externas (CoinGecko, AlphaVantage, ExchangeRate)
+model InvestmentPriceCache {
+  id        String              @id @default(uuid())
+  ticker    String
+  assetType InvestmentAssetType @map("asset_type")
+  price     Decimal             @db.Decimal(15, 4)
+  currency  String              @default("USD")
+  change24h Decimal?            @map("change_24h") @db.Decimal(10, 4)
+  // "coingecko" | "alphavantage" | "exchangerate" | "internal"
+  source    String
+  isStale   Boolean             @default(false) @map("is_stale")
+  fetchedAt DateTime            @default(now()) @map("fetched_at")
+  // updatedAt @updatedAt es CRÍTICO para TTL: fetchedAt no cambia en upserts,
+  // pero updatedAt sí refleja cuándo se actualizó el precio por última vez (Mejora #2)
+  updatedAt DateTime            @updatedAt @map("updated_at")
+
+  @@unique([ticker, assetType])
+  @@index([ticker])
+  @@index([fetchedAt])
+  @@index([updatedAt])
+  @@map("investment_price_cache")
 }

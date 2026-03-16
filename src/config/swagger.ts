@@ -23,6 +23,12 @@ const options: swaggerJsdoc.Options = {
                 description: 'Legacy alias',
             },
         ],
+        tags: [
+            {
+                name: 'Brokers',
+                description: 'Broker and investment portfolio management — CSV upload, positions, transactions, prices',
+            },
+        ],
         components: {
             securitySchemes: {
                 bearerAuth: {
@@ -42,3 +48,4 @@ const options: swaggerJsdoc.Options = {
 };
 
 export const specs = swaggerJsdoc(options);
+

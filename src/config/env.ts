@@ -19,6 +19,25 @@ const envSchema = z.object({
 
     // External Services
     GROQ_API_KEY: z.string().optional(), // Voice transaction AI service
+
+    // ── Broker / Investment Integration ──────────────────────────────────────
+    // Price Providers
+    ALPHA_VANTAGE_API_KEY: z.string().optional(),    // Stock/ETF prices. Free: ~25 req/día
+    EXCHANGERATE_API_KEY: z.string().optional(),      // Forex rates
+    COINGECKO_API_KEY: z.string().optional(),         // Crypto prices (free tier, key mejora rate limits)
+
+    // Encryption (AES-256-GCM for SnapTrade userSecret)
+    // Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+    ENCRYPTION_KEY: z.string().length(64, "ENCRYPTION_KEY must be 64 hex chars (32 bytes)").optional(),
+
+    // Admin endpoint for personal Hapi scraper (Fase 6)
+    ADMIN_SYNC_SECRET: z.string().min(32).optional(),
+
+    // SnapTrade OAuth (Fase 7)
+    SNAPTRADE_CLIENT_ID: z.string().optional(),
+    SNAPTRADE_CONSUMER_KEY: z.string().optional(),
+    // ─────────────────────────────────────────────────────────────────────────
 });
 
 export const env = envSchema.parse(process.env);
+

@@ -12,6 +12,7 @@ build/
 .env
 .env.local
 .env.production
+.env.personal        # Personal scraper credentials — NEVER commit (Fase 6)
 
 # Logs
 logs/

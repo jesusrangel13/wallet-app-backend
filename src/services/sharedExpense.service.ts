@@ -914,6 +914,16 @@ export const markParticipantAsPaid = async (
     }
   }
 
+  // Create a Payment record to settle the group balance logic (used by Dashboard)
+  await prisma.payment.create({
+    data: {
+      fromUserId: participantUserId,
+      toUserId: expense.paidByUserId,
+      amount: Number(participant.amountOwed),
+      groupId: expense.groupId,
+    },
+  });
+
   return {
     participant: updatedParticipant,
     transactionsCreated,
@@ -981,6 +991,25 @@ export const markParticipantAsUnpaid = async (
       },
     },
   });
+
+  // Remove the Payment record to restore the debt in group balance logic
+  // We match by users, group, and approximate amount (since we don't store relation ID)
+  // This is a best-effort reversal for the most recent matching payment
+  const recentPayment = await prisma.payment.findFirst({
+    where: {
+      fromUserId: participantUserId,
+      toUserId: userId, // Payer of the expense is the 'to' of the payment
+      groupId: expense.groupId,
+      amount: Number(participant.amountOwed),
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  if (recentPayment) {
+    await prisma.payment.delete({
+      where: { id: recentPayment.id }
+    });
+  }
 
   return updatedParticipant;
 };
